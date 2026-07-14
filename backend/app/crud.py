@@ -1,4 +1,5 @@
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import Article
@@ -24,13 +25,24 @@ def get_articles(
 
 
 def create_article(db: Session, article: ArticleCreate) -> tuple[Article, bool]:
-    """Get-or-create by URL. Returns (article, created)."""
+    """Get-or-create by URL. Returns (article, created).
+
+    Two concurrent ingestion runs can both pass the existence check for the
+    same URL before either commits. If that happens, the loser's commit hits
+    the unique constraint on `url`; roll back and return the winner's row
+    instead of leaving the session in an aborted-transaction state (which
+    would break every subsequent query on this session).
+    """
     existing = get_article_by_url(db, article.url)
     if existing:
         return existing, False
 
     db_article = Article(**article.model_dump())
     db.add(db_article)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return get_article_by_url(db, article.url), False
     db.refresh(db_article)
     return db_article, True
