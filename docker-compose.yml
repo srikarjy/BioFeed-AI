@@ -1,0 +1,29 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: biofeed
+      POSTGRES_PASSWORD: biofeed
+      POSTGRES_DB: biofeed
+    ports:
+      - "5434:5432"
+    volumes:
+      - biofeed_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U biofeed"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg2://biofeed:biofeed@db:5432/biofeed
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  biofeed_pgdata:
