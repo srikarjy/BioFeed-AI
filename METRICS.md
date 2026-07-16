@@ -14,7 +14,7 @@ system-level metric. **Current** values are measured on the running local stack;
 | Metric | Current (measured 2026-07-16) | Building toward |
 |---|---|---|
 | Sources ingested | **4 RSS feeds** — FiercePharma, STAT News, GEN, BioPharma Dive | 10+ sources: + PubMed (E-utilities), bioRxiv, FDA announcements (v0.2–v0.5) |
-| Articles in DB | **120** (FiercePharma 41, STAT News 40, GEN 20, BioPharma Dive 19) | Thousands+, growing continuously once scheduled ingestion lands |
+| Articles in DB | **65** (FiercePharma 25, STAT News 20, GEN 10, BioPharma Dive 10) — one run's worth; the earlier 120 had accumulated across runs, since each feed only exposes its ~10–25 most recent items | Thousands+, growing continuously once scheduled ingestion lands |
 | Ingestion cadence | Manual trigger only (`POST /ingest/run`) | Scheduled runs via Celery + Redis or APScheduler (v0.2 remaining work) |
 | Dedup effectiveness | 3-tier dedup (URL → DOI → normalized-title hash); skipped ~65 duplicates on latest run | Same layers, exercised across PubMed/bioRxiv where DOI matching matters most |
 | Run observability | `IngestionRun` table + `GET /ingest/runs` (timestamps, totals, per-source detail) | Prometheus/Grafana dashboards on top (v1.0) |
@@ -31,7 +31,7 @@ system-level metric. **Current** values are measured on the running local stack;
 | Metric | Current | Building toward |
 |---|---|---|
 | Embedding model | **PubMedBERT** (`NeuML/pubmedbert-base-embeddings`, 768-dim) in Docker; hashing fallback in tests/CI via `EMBEDDING_BACKEND` | Compare BioBERT/other biomedical encoders against a real eval set (v0.5 remaining) |
-| Number of embeddings | One per article, written at ingestion; **not re-measured since the corpus was last re-ingested** | Same, + per-user embeddings (v0.6) |
+| Number of embeddings | **65 / 65 articles** — full coverage; written at ingestion, `IngestionRun.detail.embedded` records the per-run count | Same, + per-user embeddings (v0.6) |
 | Retrieval | **pgvector HNSW (cosine)** behind `GET /search?q=` and `GET /articles/{id}/related`; verified end-to-end on Postgres | FAISS only if pgvector latency becomes the bottleneck (v0.7); sub-100 ms target |
 | Retrieval quality | **Not yet measured** — no labeled eval set; correctness verified by inspection only | NDCG@k / recall@k against a hand-labeled query → article set (v0.5 remaining) |
 | Ranking model | **None** | Two-tower retrieval + LightGBM/XGBoost reranker; cross-encoder experiments (v0.7) |
@@ -59,7 +59,16 @@ system-level metric. **Current** values are measured on the running local stack;
 | Monitoring | `IngestionRun` history only | Prometheus + Grafana, MLflow for experiment tracking (v1.0) |
 | Database | PostgreSQL 16 (**pgvector image**), SQLAlchemy 2.0 typed ORM, Alembic migrations (0001–0003) | Decision made: pgvector in-database, no FAISS sidecar until latency demands it |
 
-## 6. Hardening Done So Far (not perf numbers, but real)
+## 6. Known Data-Quality Issues
+
+- **Raw HTML leaks into RSS titles/summaries** — e.g. a FiercePharma title stored
+  as `<a href="https://www.fiercepharma.com/...`. Pre-existing (the parser stores
+  `entry.title` / `entry.summary` verbatim), but it now matters more: that markup
+  is fed straight into the embedder, so URLs and tag names become tokens and
+  dilute the vector. Strip HTML in `RSSSource.fetch` before v0.5's eval set, or
+  the eval measures the parser as much as the model.
+
+## 7. Hardening Done So Far (not perf numbers, but real)
 
 - **Race-condition-safe inserts** — DB-level unique constraint on URL with
   `IntegrityError` recovery, so concurrent ingestion runs can't duplicate rows.
