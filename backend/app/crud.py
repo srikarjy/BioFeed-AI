@@ -102,18 +102,57 @@ def create_article(db: Session, article: ArticleCreate) -> tuple[Article, bool]:
     return db_article, True
 
 
+def find_similar(
+    db: Session,
+    query_embedding: list[float],
+    limit: int = 10,
+    exclude_id: int | None = None,
+) -> list[tuple[Article, float]]:
+    """Nearest articles to a query vector, as (article, cosine similarity).
+
+    On Postgres this is a pgvector `<=>` (cosine distance) query served by the
+    HNSW index. The SQLite branch exists only for the test suite, which has no
+    vector operators — it scans in Python, which is fine at test-fixture scale.
+    """
+    filters = [Article.embedding.is_not(None)]
+    if exclude_id is not None:
+        filters.append(Article.id != exclude_id)
+
+    if db.get_bind().dialect.name == "postgresql":
+        distance = Article.embedding.cosine_distance(query_embedding)
+        rows = db.execute(
+            select(Article, distance).where(*filters).order_by(distance).limit(limit)
+        ).all()
+        return [(article, 1.0 - float(dist)) for article, dist in rows]
+
+    articles = db.execute(select(Article).where(*filters)).scalars().all()
+    scored = [(a, _cosine_similarity(query_embedding, a.embedding)) for a in articles]
+    scored.sort(key=lambda pair: pair[1], reverse=True)
+    return scored[:limit]
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = sum(x * x for x in a) ** 0.5
+    norm_b = sum(y * y for y in b) ** 0.5
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
 def record_ingestion_run(
     db: Session,
     started_at: datetime,
     added: dict[str, int],
     errors: dict[str, str],
+    embedded: int = 0,
 ) -> IngestionRun:
     run = IngestionRun(
         started_at=started_at,
         finished_at=datetime.now(timezone.utc),
         added_total=sum(added.values()),
         error_count=len(errors),
-        detail={"added": added, "errors": errors},
+        detail={"added": added, "errors": errors, "embedded": embedded},
     )
     db.add(run)
     db.commit()

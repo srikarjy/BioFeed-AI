@@ -1,9 +1,11 @@
 from datetime import datetime, timezone
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import JSON, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
+from app.ml.embeddings import EMBEDDING_DIM
 
 
 class Article(Base):
@@ -25,6 +27,9 @@ class Article(Base):
     # sha256 of the normalized title, used as a last-resort dedup key when the
     # same paper surfaces from two sources under different URLs and no shared DOI.
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    # Semantic embedding of title + summary (see app.ml.service). Nullable so
+    # ingestion never blocks on the embedder; embed_missing backfills gaps.
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

@@ -25,6 +25,12 @@ class ArticleRead(ArticleBase):
     fetched_at: datetime
 
 
+class ScoredArticleRead(ArticleRead):
+    """An article plus its cosine similarity to the query/anchor article."""
+
+    similarity: float
+
+
 class IngestResult(BaseModel):
     added: dict[str, int]
     errors: dict[str, str]
