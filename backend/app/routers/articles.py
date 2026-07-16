@@ -3,7 +3,8 @@ from sqlalchemy.orm import Session
 
 from app import crud
 from app.database import get_db
-from app.schemas import ArticleRead
+from app.ml import service as ml_service
+from app.schemas import ArticleRead, ScoredArticleRead
 
 router = APIRouter(prefix="/articles", tags=["articles"])
 
@@ -24,3 +25,25 @@ def read_article(article_id: int, db: Session = Depends(get_db)):
     if article is None:
         raise HTTPException(status_code=404, detail="Article not found")
     return article
+
+
+@router.get("/{article_id}/related", response_model=list[ScoredArticleRead])
+def related_articles(
+    article_id: int,
+    limit: int = Query(default=10, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    article = crud.get_article(db, article_id)
+    if article is None:
+        raise HTTPException(status_code=404, detail="Article not found")
+    if article.embedding is None:
+        # Article predates the embedder or slipped through a run; embed now so
+        # the endpoint always works rather than returning nothing.
+        ml_service.embed_articles(db, [article])
+    results = crud.find_similar(db, article.embedding, limit=limit, exclude_id=article_id)
+    return [
+        ScoredArticleRead(
+            **ArticleRead.model_validate(match).model_dump(), similarity=round(score, 4)
+        )
+        for match, score in results
+    ]

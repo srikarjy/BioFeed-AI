@@ -11,7 +11,8 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        # pgvector image: migration 0003 creates the vector extension.
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: biofeed
           POSTGRES_PASSWORD: biofeed
@@ -35,10 +36,18 @@ jobs:
         with:
           python-version: "3.12"
 
+      # requirements-ml.txt (torch) is deliberately not installed: tests run
+      # with EMBEDDING_BACKEND=hash, keeping CI fast.
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      - name: Run migrations
+        env:
+          DATABASE_URL: postgresql+psycopg2://biofeed:biofeed@localhost:5432/biofeed
+        run: alembic upgrade head
 
       - name: Run tests
         env:
           DATABASE_URL: postgresql+psycopg2://biofeed:biofeed@localhost:5432/biofeed
+          EMBEDDING_BACKEND: hash
         run: pytest
