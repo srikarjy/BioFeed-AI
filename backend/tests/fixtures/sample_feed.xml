@@ -16,5 +16,11 @@
       <description>An example summary of the second article.</description>
       <pubDate>Tue, 07 Jul 2026 09:30:00 GMT</pubDate>
     </item>
+    <item>
+      <title>&lt;a href="https://example.com/x"&gt;Gene Therapy&lt;/a&gt; Wins Approval</title>
+      <link>https://example.com/articles/3</link>
+      <description>&lt;p&gt;Summary with &lt;b&gt;bold&lt;/b&gt; markup &amp;amp; an entity.&lt;/p&gt;</description>
+      <pubDate>Wed, 08 Jul 2026 09:30:00 GMT</pubDate>
+    </item>
   </channel>
 </rss>
