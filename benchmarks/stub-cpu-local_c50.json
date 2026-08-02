@@ -1,0 +1,17 @@
+{
+  "requests_total": 100,
+  "requests_ok": 100,
+  "requests_failed": 0,
+  "wall_seconds": 2.953,
+  "throughput_req_per_sec": 33.866,
+  "throughput_tokens_per_sec": 1591.71,
+  "latency_p50_ms": 1457.2,
+  "latency_p95_ms": 1514.6,
+  "latency_p99_ms": 1515.5,
+  "ttft_p50_ms": 1457.1,
+  "ttft_p95_ms": 1514.6,
+  "sample_errors": [],
+  "label": "stub-cpu-local",
+  "concurrency": 50,
+  "timestamp": "2026-07-28T22:39:21.930663+00:00"
+}
