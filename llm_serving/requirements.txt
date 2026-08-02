@@ -1,0 +1,4 @@
+# Serving-only dependencies for the rented GPU instance. Kept separate from
+# backend/requirements*.txt -- this never runs inside the FastAPI container.
+vllm==0.6.6.post1
+huggingface_hub==0.26.2

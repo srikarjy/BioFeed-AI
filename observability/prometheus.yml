@@ -1,0 +1,22 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  # Real target: the rented GPU instance running llm_serving/serve.sh.
+  # This Prometheus never runs on the GPU box -- it scrapes it over the
+  # network. Replace YOUR_GPU_HOST:8000 with the actual reachable
+  # host:port before starting the stack.
+  - job_name: vllm
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["YOUR_GPU_HOST:8000"]
+
+  # Local wiring validation target: scripts/stub_vllm_server.py exposes a
+  # minimal /metrics stub (see benchmarks/report.md for why numbers from it
+  # aren't representative). host.docker.internal resolves to the host
+  # machine from inside the prometheus container (see extra_hosts in
+  # docker-compose.yml).
+  - job_name: vllm-stub-local
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:9100"]
