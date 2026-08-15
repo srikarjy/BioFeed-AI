@@ -306,3 +306,26 @@ def test_interaction_weighting(db_session: Session):
     assert abs(norm - 1.0) < 0.01
     # Should have some non-zero values
     assert any(v != 0 for v in embedding)
+
+def test_v07_endpoint_falls_back_without_trained_models(client, db_session):
+    """The v0.7 route must never 500 for lack of trained checkpoints (or, in a
+    minimal environment, for lack of torch/lightgbm) -- it degrades to the
+    v0.6 heuristic feed. This is the regression test for a real bug: main.py
+    used to import torch/lightgbm unconditionally via this route, which
+    crashed app startup entirely in CI (requirements.txt intentionally
+    excludes those heavy deps). See app/ml/recommender_v07.py.
+    """
+    resp = client.post("/users", json={"email": "v07-test@example.com"})
+    user_id = resp.json()["id"]
+
+    art1 = _make_article(db_session, "CRISPR therapy for sickle cell disease")
+    resp = client.post(
+        f"/users/{user_id}/interactions",
+        json={"article_id": art1.id, "interaction_type": "bookmark"},
+    )
+    assert resp.status_code == 200
+
+    resp = client.get(f"/v0.7/users/{user_id}/feed")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "items" in body

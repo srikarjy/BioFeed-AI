@@ -1,10 +1,24 @@
-"""Training pipeline for v0.7 models."""
+"""Training pipeline for v0.7 models.
+
+On macOS, run with OMP_NUM_THREADS=1 (see the import-order note below) --
+without it, training the LightGBM reranker in the same process as a loaded
+torch model segfaults:
+
+    OMP_NUM_THREADS=1 python scripts/train_v07.py --output-dir models/v0.7
+"""
 
 import os
 import sys
 import argparse
 from pathlib import Path
 
+# lightgbm must be imported before torch: on macOS both bundle their own
+# OpenMP runtime (libomp.dylib), and importing torch first causes lightgbm's
+# native training call to segfault (SIGSEGV, exit 139) the moment it spins up
+# its own OpenMP threads. Reproduced directly:
+#   python -c "import torch, lightgbm as lgb; <train a booster>"  -> segfault
+#   python -c "import lightgbm as lgb, torch; <train a booster>"  -> fine
+import lightgbm  # noqa: F401  (import-order fix, see above)
 import numpy as np
 import torch
 

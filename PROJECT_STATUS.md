@@ -74,7 +74,7 @@ were worth building.
   scaffolding.
 - Per-item "recommended because…" reason string (`crud._generate_reason`).
 
-### v0.7 — Intelligent Ranking ✅ (code + training pipeline; not yet trained on real users)
+### v0.7 — Intelligent Ranking ✅ (pipeline built, fixed, and verified end-to-end on synthetic data; not yet trained on real users)
 
 - `app/ml/two_tower.py` — two-tower retrieval model (user tower, item tower,
   contrastive training on interaction pairs).
@@ -85,11 +85,54 @@ were worth building.
 - `app/ml/recommender_v07.py` / `GET /users/{id}/feed` (v0.7 route,
   `recommendations_v07.py`) — loads trained models from `MODEL_DIR` if
   present, retrieval → rerank → reasons; **falls back cleanly to v0.6 logic**
-  when no trained checkpoint exists, which is the honest current state:
-  there are no real users yet, so nothing has been trained. The pipeline is
-  real and tested against synthetic interaction data
-  (`tests/test_recommendations.py`); training against real usage is gated on
-  v0.3/v0.4 (auth + mobile app) actually producing interaction logs.
+  when no trained checkpoint exists.
+
+**This pipeline was written but had never actually been run before this
+pass — running it end to end surfaced four real bugs, now fixed:**
+
+1. **CI was silently broken.** `app.main` imports `recommendations_v07`,
+   which imported `torch` and `lightgbm` unconditionally at module level.
+   `requirements.txt` (the light file CI installs, deliberately excluding
+   `requirements-ml.txt`'s heavy deps) has neither — so `backend-ci` has
+   been red on every push since the v0.6/v0.7 commit landed. Fixed by making
+   those imports lazy (inside `V07Recommender._load_models` /
+   `get_recommendations`, not at module import time), with an `ImportError`
+   fallback to the v0.6 feed. Verified by building a clean venv from
+   `requirements.txt` alone and confirming `from app.main import app` and
+   the full test suite both succeed without torch/lightgbm installed.
+2. **`MODEL_DIR` defaulted to a hardcoded personal absolute path**
+   (`/Users/srikarjy/...`) — broken on any other machine. Now resolved
+   relative to the module file.
+3. **A pgvector truthiness bug** in `two_tower.create_training_data`:
+   `if article and article.embedding:` raises `ValueError: truth value of
+   an array...` because a loaded `Vector` column comes back as a numpy
+   array, not a plain list. Fixed to `is not None` checks.
+4. **`lightgbm` 4.x API break**: `lgb.train(..., early_stopping_rounds=...,
+   verbose_eval=...)` — both kwargs were removed in favor of `callbacks=
+   [lgb.early_stopping(...), lgb.log_evaluation(...)]`. Fixed.
+
+**Environment note (not a code bug, but real and worth knowing):** on the
+macOS dev machine, torch and lightgbm both bundle their own OpenMP runtime;
+loading both in one process and then calling into lightgbm segfaults
+(SIGSEGV) unless `OMP_NUM_THREADS=1`. Reproduced directly (`python -c
+"import torch, lightgbm as lgb; <train>"` crashes;
+`OMP_NUM_THREADS=1 python -c "..."` doesn't). Set defensively in the
+Dockerfile; not yet confirmed whether the Linux/slim image needs it too (no
+GPU/Docker runtime available to verify here — see Future Tasks).
+
+**Verified end to end** (`scripts/seed_v07_synthetic.py` — 139 synthetic
+articles across 10 topic clusters, 25 synthetic users with topic-affinity
+interactions, since there are zero real users; the corpus is disjoint from
+the retrieval eval corpus and exists only for this verification):
+`train_v07.py` trained both models (two-tower: 344 positive pairs, 15
+epochs; LightGBM reranker: 688 samples, validation AUC 0.91, with
+`user_item_cosine` dominating feature importance as expected). Loading the
+resulting checkpoints via `MODEL_DIR` and calling `get_enhanced_feed`
+returns `cold_start=False` with real two-tower + reranker scores and
+on-topic recommendations — the full pipeline runs, not just its unit tests.
+Training against *real* usage is still gated on v0.3/v0.4 (auth + mobile
+app) actually producing interaction logs; synthetic verification confirms
+the pipeline works, not that the model is good on real behavior.
 
 ### Anomaly Detection + Self-Hosted LLM Explanations ✅ (additive, backend-only, not on the original roadmap)
 
@@ -135,15 +178,22 @@ market-signal module. Fully isolated in `app/anomaly/`, `app/llm/`,
       `sentence-transformers`/torch aren't installed outside Docker.
 
 ### v0.7 remaining
+- [x] ~~Verify the training pipeline actually runs~~ — done this pass on
+      synthetic data; surfaced and fixed 4 real bugs (see above).
 - [ ] Run `scripts/train_v07.py` against real interaction data once v0.3/v0.4
-      produce actual users; until then the v0.7 route always falls back to
-      v0.6 logic in practice (correctly — there's nothing to score against).
+      produce actual users — synthetic verification proves the pipeline
+      works, not that the model is good on real behavior.
+- [ ] Confirm `OMP_NUM_THREADS=1` is actually needed on the Linux/Docker
+      image (only reproduced on macOS so far; set defensively either way).
 - [ ] Cross-encoder reranking experiment (mentioned in `BLUEPRINT.md`, not
       started).
 
 ### Anomaly / LLM remaining
 - [ ] Run `llm_serving/` against a real GPU instance and re-verify the
       Grafana dashboard and `benchmarks/report.md` numbers against it.
+      Candidate host: a Hugging Face GPU Space/Job under the project's HF
+      account, as an alternative to renting a bare GPU instance — not yet
+      attempted.
 
 ### v0.8 — Knowledge Graph
 - [ ] Entity relationship graph (company → disease → trial → drug → paper),
@@ -196,6 +246,10 @@ market-signal module. Fully isolated in `app/anomaly/`, `app/llm/`,
 | 19 | **v0.7 falls back to v0.6, not to an error** | `recommender_v07.py` checks for trained checkpoints and degrades to the v0.6 heuristic feed when none exist, so the "intelligent ranking" route is always safe to call even with zero trained models — honest about the current state (no real users yet) instead of hiding it behind a required model file. |
 | 20 | **Anomaly/LLM feature built additive and isolated from the core feed** | Demonstrates self-hosted LLM serving skills (vLLM, SSE, observability) on its own timeline, without coupling the resume-critical recommendation path to GPU availability. `LLM_ENABLED` is a real kill switch, not decoration. |
 | 21 | **Retrieval eval set is a fixed synthetic corpus, not the live DB** | The production DB is one ingestion run's worth of articles (see `METRICS.md`) — too small and too RSS-skewed to be a stable eval target. A fixed, deliberately multi-topic 30-article corpus with hand-labeled queries gives a reproducible, CI-enforceable signal independent of what's currently ingested. |
+| 22 | **Heavy ML imports (torch, lightgbm) are lazy in `recommender_v07.py`, not module-level** | Discovered this pass: `app.main` imported them unconditionally through the v0.7 router, so `backend-ci` (which only installs the light `requirements.txt`) had been failing on every push since v0.6/v0.7 landed. Lazy imports inside `_load_models`/`get_recommendations`, with an `ImportError`-caught fallback to the v0.6 feed, keep `app.main` importable — and the v0.7 route serving a real (if simpler) feed — with or without the ML deps installed. |
+| 23 | **`lightgbm` imported before `torch` in the v0.7 load path** | Both bundle their own OpenMP runtime; on macOS, importing torch first and then calling into lightgbm segfaults. `_load_models` imports `lightgbm` first (even though it's only used later in the reranker branch) to establish a safe load order for the rest of the process's lifetime; `OMP_NUM_THREADS=1` is still required on top of this (see Dockerfile) — the reorder alone wasn't sufficient. |
+| 24 | **Synthetic seed script (`scripts/seed_v07_synthetic.py`) to verify the v0.7 pipeline, not to fake a trained model** | With zero real users, `train_v07.py` had literally never been executed — it was untested code. A disjoint, deliberately non-real, topic-clustered synthetic corpus + users lets the training/inference pipeline be run and verified end to end (it trained, it loaded, it scored). Explicitly not committed as a shipped model or represented as trained on real behavior — see the caveat in `METRICS.md`. |
+| 25 | **Model checkpoints (`*.pt`, `models/*.txt`) stay out of git (`.gitignore`)** | Trained artifacts are reproducible from `train_v07.py`/`seed_v07_synthetic.py` and change size/content on every run; committing them would bloat the repo for no benefit over documenting how to regenerate them. |
 
 ---
 
@@ -230,6 +284,7 @@ backend/
   scripts/
     eval_retrieval.py     v0.5 retrieval quality eval (Recall@k, NDCG@k)
     train_v07.py          two-tower + reranker training pipeline
+    seed_v07_synthetic.py synthetic corpus/users to exercise train_v07.py without real users
   requirements-ml.txt     heavy ML deps (sentence-transformers/torch), split out to keep CI light
   tests/                  API, RSS, CRUD, dedup, retrieval, retrieval-eval, recommendations, anomaly tests
 llm_serving/              GPU-instance vLLM deployment scripts (see ANOMALY_EXPLAIN_LLM.md)

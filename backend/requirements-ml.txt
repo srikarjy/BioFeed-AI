@@ -1,3 +1,10 @@
 # Heavy ML dependencies, split out so tests/CI stay light (they use
 # EMBEDDING_BACKEND=hash). Docker installs both files.
 sentence-transformers==3.3.1
+
+# v0.7 two-tower retrieval + reranker training/inference. Imported lazily
+# in app/ml/recommender_v07.py so app.main stays importable (and the v0.7
+# route falls back to v0.6) without these installed.
+torch==2.13.0
+lightgbm==4.7.0
+numpy==2.5.1

@@ -1,40 +1,64 @@
-"""Enhanced recommendation service for v0.7: Two-tower + LightGBM reranker."""
+"""Enhanced recommendation service for v0.7: Two-tower + LightGBM reranker.
+
+Heavy deps (torch, lightgbm — requirements-ml.txt, not the light
+requirements.txt CI installs) are imported lazily inside the methods that
+need them, not at module level. That keeps `app.main` importable — and the
+v0.7 route serving the v0.6 fallback feed — even where torch/lightgbm
+aren't installed, matching the "v0.7 never 500s for lack of a model" design
+(see PROJECT_STATUS.md decision #19, extended here to cover missing deps,
+not just missing checkpoint files).
+
+When both checkpoints ARE present, the process needs OMP_NUM_THREADS=1 (set
+in the Dockerfile; export it yourself if running uvicorn directly outside
+Docker) -- torch and lightgbm both bundle their own OpenMP runtime, and
+loading both then calling into lightgbm without it segfaults on macOS. See
+scripts/train_v07.py for the minimal repro.
+"""
 
 import os
-import pickle
 from pathlib import Path
 from typing import Optional
-from datetime import datetime, timezone
 
-import numpy as np
-import torch
-
-from app.ml.two_tower import TwoTowerModel
-from app.ml.reranker import LightGBMReranker, extract_features, get_user_stats, compute_user_affinities
 from app import crud
-from app.models import Article, UserEmbedding
+from app.models import Article
 
 
-# Model paths
-MODEL_DIR = Path(os.getenv("MODEL_DIR", "/Users/srikarjy/resume_projects/Biofeed-AI/backend/models/v0.7"))
+# Model paths. Resolved relative to this file (backend/app/ml/..), not a
+# hardcoded absolute path, so it works on any machine; MODEL_DIR still
+# overrides for deployments that store checkpoints elsewhere.
+MODEL_DIR = Path(os.getenv("MODEL_DIR", str(Path(__file__).resolve().parents[2] / "models" / "v0.7")))
 TWO_TOWER_PATH = MODEL_DIR / "two_tower.pt"
 RERANKER_PATH = MODEL_DIR / "reranker.txt"
 
 
 class V07Recommender:
     """v0.7 recommender with two-tower retrieval + LightGBM reranking."""
-    
+
     def __init__(self, device: str = "cpu"):
         self.device = device
-        self.two_tower: Optional[TwoTowerModel] = None
-        self.reranker: Optional[LightGBMReranker] = None
+        self.two_tower = None
+        self.reranker = None
         self._load_models()
-    
+
     def _load_models(self):
-        """Load trained models if available."""
+        """Load trained models if available and their libraries are installed."""
+        # Import lightgbm before torch gets imported below, even though it's
+        # only used in the reranker block further down: on macOS both bundle
+        # their own OpenMP runtime, and importing torch first makes lightgbm's
+        # native training/predict calls segfault (SIGSEGV) the moment it
+        # spins up its own OpenMP threads. See the identical note in
+        # scripts/train_v07.py for a minimal repro.
+        try:
+            import lightgbm  # noqa: F401
+        except ImportError:
+            pass
+
         # Load two-tower
         if TWO_TOWER_PATH.exists():
             try:
+                import torch
+                from app.ml.two_tower import TwoTowerModel
+
                 checkpoint = torch.load(TWO_TOWER_PATH, map_location=self.device)
                 config = checkpoint.get("config", {})
                 self.two_tower = TwoTowerModel(
@@ -46,17 +70,25 @@ class V07Recommender:
                 self.two_tower.to(self.device)
                 self.two_tower.eval()
                 print(f"Loaded two-tower model from {TWO_TOWER_PATH}")
+            except ImportError:
+                print("torch not installed; v0.7 two-tower retrieval unavailable, falling back to v0.6")
+                self.two_tower = None
             except Exception as e:
                 print(f"Failed to load two-tower model: {e}")
                 self.two_tower = None
         else:
             print("Two-tower model not found, using fallback")
-        
+
         # Load reranker
         if RERANKER_PATH.exists():
             try:
+                from app.ml.reranker import LightGBMReranker
+
                 self.reranker = LightGBMReranker(str(RERANKER_PATH))
                 print(f"Loaded reranker from {RERANKER_PATH}")
+            except ImportError:
+                print("lightgbm not installed; v0.7 reranking unavailable, falling back to v0.6")
+                self.reranker = None
             except Exception as e:
                 print(f"Failed to load reranker: {e}")
                 self.reranker = None
@@ -90,13 +122,20 @@ class V07Recommender:
         Returns:
             List of (article, score, reason)
         """
+        # Only reached once _load_models() has already imported these
+        # successfully (has_models gates the call in get_enhanced_feed), so
+        # these imports are safe here.
+        import numpy as np
+        import torch
+        from app.ml.reranker import extract_features, get_user_stats, compute_user_affinities
+
         # Get user embedding
         user_emb_db = crud.get_user_embedding(db, user_id)
-        
+
         if user_emb_db is None or user_emb_db.embedding is None:
             # Cold start - fall back to v0.6 logic
             return crud.get_personalized_feed(db, user_id, limit, 0)
-        
+
         user_emb_np = np.array(user_emb_db.embedding, dtype=np.float32)
         user_emb_torch = torch.from_numpy(user_emb_np).to(self.device)
         

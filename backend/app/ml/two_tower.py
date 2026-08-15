@@ -206,7 +206,7 @@ def create_training_data(
                 Article.embedding.isnot(None)
             ).first()
             
-            if article and article.embedding:
+            if article is not None and article.embedding is not None:
                 item_emb = torch.tensor(article.embedding, dtype=torch.float32)
                 training_pairs.append((user_emb, item_emb, 1.0))
     

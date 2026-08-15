@@ -234,25 +234,30 @@ class LightGBMReranker:
             default_params.update(params)
         
         train_data = lgb.Dataset(X_train, label=y_train, feature_name=self.feature_names)
-        
+
         valid_sets = [train_data]
         valid_names = ["train"]
-        
+
         if X_val is not None and y_val is not None:
             val_data = lgb.Dataset(X_val, label=y_val, feature_name=self.feature_names)
             valid_sets.append(val_data)
             valid_names.append("valid")
-        
+
+        # lightgbm >= 4.0 dropped the early_stopping_rounds/verbose_eval train()
+        # kwargs in favor of callbacks.
+        callbacks = [lgb.log_evaluation(period=100)]
+        if X_val is not None and y_val is not None:
+            callbacks.append(lgb.early_stopping(stopping_rounds=early_stopping_rounds))
+
         self.model = lgb.train(
             default_params,
             train_data,
             num_boost_round=num_boost_round,
             valid_sets=valid_sets,
             valid_names=valid_names,
-            early_stopping_rounds=early_stopping_rounds if X_val is not None else None,
-            verbose_eval=100,
+            callbacks=callbacks,
         )
-        
+
         return self
     
     def predict(self, X: np.ndarray) -> np.ndarray:
