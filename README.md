@@ -1,40 +1,109 @@
 # BioFeed AI
 
-Personalized biotech intelligence feed for iOS, with a recommendation engine built on biomedical text embeddings, learning-to-rank, and (from v2.0) a biotech stock event-correlation module.
+A personalized biotech intelligence feed. A FastAPI service ingests biomedical
+literature and biotech news, embeds it with biomedical transformer models,
+and ranks it per-user with a two-tower retrieval model and a LightGBM
+reranker — the same architecture family as feed ranking at TikTok/Spotify/
+LinkedIn, applied to a data-rich niche vertical instead of another generic
+"X for Y" recsys clone.
 
-See [`BLUEPRINT.md`](./BLUEPRINT.md) for the full architecture, tech stack, versioned roadmap, and resume framing.
+See [`BLUEPRINT.md`](./BLUEPRINT.md) for the full roadmap and resume framing,
+[`PROJECT_STATUS.md`](./PROJECT_STATUS.md) for what's built and the
+architecture decisions behind it, and [`METRICS.md`](./METRICS.md) for
+measured vs. target numbers.
 
 ---
 
 ## What this is
 
-A native iOS app backed by a FastAPI service that:
+A FastAPI backend (native iOS client planned, not yet built) that:
 
-1. Ingests biotech literature, news, FDA updates, and company announcements
-2. Embeds and understands content using biomedical transformer models (PubMedBERT, BioBERT)
-3. Learns a personalized ranking from user interaction signals (reading time, bookmarks, scroll, search)
-4. Serves an explainable, personalized feed ("recommended because...")
-5. (v2.0+) Correlates biotech scientific/regulatory events with stock price movement using event-study methodology
+1. **Ingests** biotech news (RSS), biomedical literature (PubMed E-utilities),
+   and preprints (bioRxiv/medRxiv) on a scheduled cadence, with per-source
+   error isolation and three-tier cross-source dedup (URL → DOI → normalized
+   title hash).
+2. **Embeds** every article with PubMedBERT (768-dim, pgvector/HNSW) so
+   `GET /search?q=` and `GET /articles/{id}/related` do real semantic
+   retrieval, not keyword matching.
+3. **Learns a personalized ranking** from interaction signals (reads,
+   bookmarks, likes, hides, searches): a user embedding built from weighted
+   interaction history, retrieved via a two-tower model, reranked by
+   LightGBM on user/article/affinity features — falling back cleanly to
+   content-similarity for cold-start users with no history yet.
+4. **Explains anomalies via a self-hosted LLM**: a cross-source burst
+   detector flags when multiple outlets cover the same story within 48h,
+   and a vLLM-served model streams a plain-language explanation — backend
+   infrastructure work (SSE streaming, Prometheus/Grafana, load-testing)
+   kept isolated from the core feed, documented honestly as unverified
+   against a real GPU (see [`ANOMALY_EXPLAIN_LLM.md`](./ANOMALY_EXPLAIN_LLM.md)).
 
-Architecturally, this is a general-purpose personalized content ranking system (the same family as consumer feed ranking at TikTok/Spotify/LinkedIn), applied to a biotech-specific vertical to avoid duplicating the thousand generic "X for Y" recsys clones, and extended with a market-signal module that most content-feed projects don't have.
+The mobile client, auth, knowledge graph, and the v2.0 market-signal module
+are roadmap, not shipped — see [`BLUEPRINT.md`](./BLUEPRINT.md) §4 for what's
+next and why the order was chosen.
 
 ## Quick links
 
 - [Full blueprint & roadmap](./BLUEPRINT.md)
-- Tech stack: Swift/SwiftUI (mobile) · Python/FastAPI/PostgreSQL/Redis (backend) · PyTorch/Sentence-Transformers/FAISS (ML) · Docker/AWS/MLflow/Prometheus (infra)
+- [Project status & architecture decisions](./PROJECT_STATUS.md)
+- [Measured metrics](./METRICS.md)
+- [Anomaly detection + self-hosted LLM explanations](./ANOMALY_EXPLAIN_LLM.md)
+- Tech stack: Python/FastAPI/PostgreSQL(pgvector)/SQLAlchemy/Alembic/
+  APScheduler · PyTorch/Sentence-Transformers/PubMedBERT/LightGBM ·
+  Docker/GitHub Actions/Prometheus/Grafana/vLLM · Swift/SwiftUI (planned)
 
 ## Status
 
-Currently scoping toward v0.6 (first resume-ready milestone: end-to-end personalized recommender). See the roadmap in `BLUEPRINT.md` for what's shipped vs. planned.
+**v0.1–v0.7 shipped**: FastAPI + PostgreSQL foundation, multi-source
+ingestion (RSS + PubMed + bioRxiv/medRxiv) on a scheduler, semantic search
+and retrieval over pgvector, and a two-tower + LightGBM recommendation
+pipeline with a labeled retrieval eval set. Plus an additive anomaly
+detection + self-hosted LLM explanation feature. See `PROJECT_STATUS.md`
+for the full breakdown and what's next (auth, mobile app, knowledge graph,
+market-signal module).
 
-## Repo structure (planned)
+## Running it
+
+```bash
+docker compose up --build          # FastAPI + Postgres(pgvector)
+curl http://localhost:8000/health
+curl -X POST http://localhost:8000/ingest/run   # manual trigger; scheduler also runs it every INGESTION_INTERVAL_MINUTES
+curl "http://localhost:8000/search?q=CRISPR%20sickle%20cell"
+```
+
+Backend tests (no Docker/torch needed — uses the dependency-free hashing
+embedder and SQLite):
+
+```bash
+cd backend
+pip install -r requirements.txt
+EMBEDDING_BACKEND=hash pytest -q
+```
+
+Retrieval-quality eval against the hand-labeled query set
+(`tests/fixtures/retrieval_eval.json`), enforced as a CI floor and runnable
+standalone for a full per-query report:
+
+```bash
+cd backend
+EMBEDDING_BACKEND=hash python scripts/eval_retrieval.py
+```
+
+## Repo structure
 
 ```
-/ios              SwiftUI application
-/backend          FastAPI service, ingestion, ranking
-/ml               training scripts, embedding pipelines, ranking models
-/market           (v2.0+) event-study pipeline, ticker mapping, OHLCV ingestion
-/infra            Docker, CI/CD, monitoring configs
+backend/            FastAPI service
+  app/
+    ingestion/       Source abstraction: RSS, PubMed, bioRxiv/medRxiv
+    ml/               Embeddings, two-tower model, LightGBM reranker
+    anomaly/          Cross-source burst detector
+    llm/              vLLM client + SSE route for anomaly explanations
+    routers/          articles, search, ingestion, recommendations
+  scripts/            eval_retrieval.py, train_v07.py
+  tests/              pytest suite (API, dedup, retrieval, recommendations)
+llm_serving/         GPU-instance vLLM deployment scripts
+observability/       Prometheus + Grafana (scrapes vLLM /metrics)
+benchmarks/          Load-test reports for the anomaly-explain endpoint
+ios/                 (planned, v0.4)
 ```
 
 ## License
