@@ -1,0 +1,20 @@
+{
+  "label": "vllm-l4-direct",
+  "concurrency": 10,
+  "requests_total": 30,
+  "requests_ok": 30,
+  "requests_failed": 0,
+  "wall_seconds": 8.47,
+  "req_per_sec": 3.542,
+  "tokens_per_sec": 517.973,
+  "p50_ms": 2724.2,
+  "p95_ms": 3058.3,
+  "p99_ms": 3060.7,
+  "ttft_p50_ms": 57.3,
+  "ttft_p95_ms": 408.7,
+  "sample_errors": [],
+  "model": "TheBloke/Mistral-7B-Instruct-v0.2-AWQ",
+  "hardware": "hf-jobs l4x1 (1x NVIDIA L4, 24GB)",
+  "job_id": "srikarjy025/6a8112cfc97db76cbdf3297d",
+  "measured_at": "2026-08-16T01:37:00Z"
+}

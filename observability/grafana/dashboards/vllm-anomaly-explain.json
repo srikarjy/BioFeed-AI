@@ -21,14 +21,14 @@
     },
     {
       "id": 2,
-      "title": "KV cache utilization (%)",
+      "title": "KV cache utilization (%) / prefix cache hit rate",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "fieldConfig": { "defaults": { "unit": "percent", "max": 100, "min": 0 }, "overrides": [] },
       "targets": [
-        { "expr": "vllm:gpu_cache_usage_perc * 100", "legendFormat": "GPU KV cache" },
-        { "expr": "vllm:cpu_cache_usage_perc * 100", "legendFormat": "CPU KV cache (swap)" }
+        { "expr": "vllm:kv_cache_usage_perc * 100", "legendFormat": "GPU KV cache" },
+        { "expr": "100 * sum(rate(vllm:prefix_cache_hits_total[5m])) / sum(rate(vllm:prefix_cache_queries_total[5m]))", "legendFormat": "prefix cache hit rate" }
       ]
     },
     {
@@ -82,15 +82,15 @@
     },
     {
       "id": 7,
-      "title": "Time per output token (p50/p95/p99)",
+      "title": "Inter-token latency (p50/p95/p99)",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
       "datasource": { "type": "prometheus", "uid": "Prometheus" },
       "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "targets": [
-        { "expr": "histogram_quantile(0.50, sum(rate(vllm:time_per_output_token_seconds_bucket[5m])) by (le))", "legendFormat": "p50" },
-        { "expr": "histogram_quantile(0.95, sum(rate(vllm:time_per_output_token_seconds_bucket[5m])) by (le))", "legendFormat": "p95" },
-        { "expr": "histogram_quantile(0.99, sum(rate(vllm:time_per_output_token_seconds_bucket[5m])) by (le))", "legendFormat": "p99" }
+        { "expr": "histogram_quantile(0.50, sum(rate(vllm:inter_token_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(vllm:inter_token_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(vllm:inter_token_latency_seconds_bucket[5m])) by (le))", "legendFormat": "p99" }
       ]
     }
   ]

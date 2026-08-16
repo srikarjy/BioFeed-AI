@@ -167,12 +167,21 @@ market-signal module. Fully isolated in `app/anomaly/`, `app/llm/`,
   single-threaded sqlite3 connection) unless the engine is configured with
   `check_same_thread=False` + `StaticPool` — `app/database.py` now does
   this automatically for any `sqlite://` URL; production still always uses
-  Postgres. **Grafana dashboard**: checked (not screenshotted) against the
-  same run's real `/metrics` output — 7 of 10 panel metric names match, 3
-  don't (`gpu_cache_usage_perc`, `cpu_cache_usage_perc`,
-  `time_per_output_token_seconds` — likely renamed in a newer vLLM
-  release), a real, previously-unknown gap now documented instead of
-  assumed correct.
+  Postgres. **Grafana dashboard**: checked against real `/metrics` output —
+  7 of 10 panel metric names matched immediately, 3 didn't
+  (`gpu_cache_usage_perc`, `cpu_cache_usage_perc`,
+  `time_per_output_token_seconds`), a real, previously-unknown gap. **Fixed
+  the same day**: `kv_cache_usage_perc` (renamed), prefix-cache hit rate
+  (replaces `cpu_cache_usage_perc`, which no longer exists in this vLLM
+  version — no direct replacement), `inter_token_latency_seconds`
+  (renamed) — all confirmed present in real `/metrics` output. Still not
+  screenshotted against a live Grafana instance.
+  **Also verified the originally-targeted GPU class**: a matched
+  Hugging Face Jobs `l4x1` (1x L4, 24GB) run at concurrency 10 measured
+  TTFT p50 57.3ms direct / 89.1ms full-relay vs. the T4's 104.8ms/147.4ms
+  — roughly halves TTFT and isolates a real ~32ms FastAPI-hop cost, both
+  numbers `llm_serving/serve.sh`'s comments assumed but hadn't measured.
+  ~$0.19 total GPU spend across all three jobs this pass.
 
 ### v0.3 — Authentication ✅ (backend; no iOS client to actually run it against)
 
@@ -314,17 +323,29 @@ none of this reintroduced the unconditional-heavy-import bug.
       `/metrics`~~ — done: 3 of 10 don't match this vLLM version
       (`gpu_cache_usage_perc`, `cpu_cache_usage_perc`,
       `time_per_output_token_seconds`), now documented.
-- [ ] Fix the 3 stale metric names in
-      `observability/grafana/dashboards/vllm-anomaly-explain.json` and
-      verify the dashboard actually renders against a live Prometheus
-      scrape (a metric-name diff isn't a screenshot).
-- [ ] A10G/L4-class numbers for comparison against the T4 baselines above —
-      the originally targeted GPU class in `llm_serving/serve.sh`.
-- [ ] Re-run `vllm-t4-direct` and `vllm-t4-full-relay` at matched
-      concurrency to isolate the FastAPI-hop overhead cleanly (currently
-      10 vs. 5).
-- [ ] A from-scratch GPU-host run with real Postgres in the loop (this
-      pass used SQLite on the GPU box for setup speed; Postgres is already
+- [x] ~~Fix the 3 stale metric names~~ — done 2026-08-16: captured real
+      `/metrics` output on a live vLLM server and grepped the actual names.
+      `gpu_cache_usage_perc` → `kv_cache_usage_perc` (renamed);
+      `cpu_cache_usage_perc` → **removed, no replacement** (this vLLM
+      version dropped CPU/swap KV cache tracking; the panel now shows
+      prefix-cache hit rate instead, the closest real signal);
+      `time_per_output_token_seconds` → `inter_token_latency_seconds`
+      (renamed). Applied to
+      `observability/grafana/dashboards/vllm-anomaly-explain.json`.
+      **Still not done**: pointing the dashboard at a live Prometheus+vLLM
+      pair and visually confirming it renders — this fix is confirmed by
+      metric-name presence in real `/metrics` output, not a screenshot.
+- [x] ~~A10G/L4-class numbers~~ — done 2026-08-16 on `l4x1` (1x L4, 24GB):
+      TTFT p50 57.3ms vs. the T4's 104.8ms at the same concurrency (10) —
+      roughly halves TTFT and cuts p95 tail ~5x, the number
+      `llm_serving/serve.sh`'s engine-arg comments assumed but never
+      measured. See `benchmarks/report.md` (`vllm-l4-direct`).
+- [x] ~~Matched-concurrency direct vs. full-relay comparison~~ — done in
+      the same L4 job, both at concurrency 10: TTFT p50 57.3ms (direct) →
+      89.1ms (full relay), isolating a real ~32ms FastAPI-hop cost
+      (`vllm-l4-full-relay`).
+- [ ] A from-scratch GPU-host run with real Postgres in the loop (every
+      GPU run so far used SQLite for setup speed; Postgres is already
       exercised separately in CI, but not together with a live GPU).
 
 ### v0.8 remaining

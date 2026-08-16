@@ -22,44 +22,52 @@ everything added is additive and lives in `backend/app/anomaly/`,
   for the exact heuristic and thresholds.
 - **LLM route**: real, tested against a local stand-in server, and now
   against a real vLLM server too (below).
-- **vLLM serving**: **verified on a real GPU, twice (2026-08-15/16)**.
-  Run 1: the target checkpoint (`TheBloke/Mistral-7B-Instruct-v0.2-AWQ`)
-  served via `vllm/vllm-openai` on a Hugging Face Jobs T4, hit directly —
-  90/90 real streaming requests, TTFT p50 105ms at concurrency 10
-  (`vllm-t4-direct` in `benchmarks/report.md`). Run 2: the real product
-  path — a real FastAPI backend and real vLLM in the *same* GPU job,
-  `GET /internal/anomaly-explain/{event_id}` → `app/llm/client.py` → real
-  vLLM → SSE back to the caller, no stand-ins anywhere in the path —
-  15/15 requests, TTFT p50 147ms (`vllm-t4-full-relay`). Getting run 2
-  working surfaced and fixed a real bug: a bare SQLite `DATABASE_URL`
+- **vLLM serving**: **verified on real GPUs, four runs across two GPU
+  classes (2026-08-15/16)**. T4 (cheapest HF Jobs flavor): direct-vLLM
+  (`vllm-t4-direct`, TTFT p50 105ms @ concurrency 10) and the real product
+  path end to end — a real FastAPI backend and real vLLM in the *same* GPU
+  job, `GET /internal/anomaly-explain/{event_id}` → `app/llm/client.py` →
+  real vLLM → SSE back to the caller, no stand-ins anywhere
+  (`vllm-t4-full-relay`, TTFT p50 147ms). L4 (the GPU class
+  `llm_serving/serve.sh` actually targets): both direct and full-relay in
+  one job at **matched concurrency (10)** — direct TTFT p50 57.3ms,
+  full-relay TTFT p50 89.1ms, isolating a real ~32ms FastAPI-hop cost.
+  L4 roughly halves TTFT and cuts the p95 tail ~5x vs. T4 at the same
+  concurrency — the GPU-class difference `serve.sh`'s comments assumed but
+  never measured. ~$0.19 total across all four runs. Getting the full-relay
+  runs working surfaced and fixed a real bug: a bare SQLite `DATABASE_URL`
   crashes a real `uvicorn` process (which runs sync path operations in a
   threadpool) unless the connection is configured for cross-thread use —
   `app/database.py` now does this automatically for any `sqlite://` URL.
   The `llm_serving/` scripts themselves (SSH-based deployment to a rented
-  instance) are still unverified as written — both runs used the official
+  instance) are still unverified as written — all runs used the official
   `vllm/vllm-openai` image directly rather than
   `download_model.sh`/`startup.sh`, though the underlying `serve.sh`
   engine args are the same ones validated by these runs.
 - **Benchmark numbers in `benchmarks/report.md`**: `stub-cpu-local` (CPU
-  stand-in) validates the wiring. `vllm-t4-direct` validates real vLLM
-  serving performance in isolation. `vllm-t4-full-relay` validates both
-  together — the actual thing a client would hit. All three numbers exist
-  now; read the caveats in that file before quoting any of them out of
-  context (different concurrency levels, T4 not the originally targeted
-  A10G/L4 class).
-- **Grafana dashboard**: panel queries use vLLM's Prometheus metric names
-  (`vllm:num_requests_running`, `vllm:gpu_cache_usage_perc`, etc.).
-  **Checked against real `/metrics` output (2026-08-16)**: 7 of 10 match;
-  3 don't (`gpu_cache_usage_perc`, `cpu_cache_usage_perc`,
-  `time_per_output_token_seconds`) — likely renamed in a newer vLLM
-  release than whatever the dashboard was originally written against. This
-  is a metric-name diff, not a rendered-dashboard screenshot — the
-  dashboard itself still hasn't been pointed at a live Prometheus/vLLM
-  pair and viewed. Raw GPU compute utilization (SM%, memory bandwidth) is
-  **not** part of vLLM's native `/metrics` — that requires a separate
-  exporter (e.g. `dcgm-exporter` or `nvidia_smi_exporter`) which is not
-  included here; only `gpu_cache_usage_perc` (KV cache occupancy, one of
-  the 3 currently-stale names above) comes from vLLM itself.
+  stand-in) validates the wiring. `vllm-t4-direct`/`vllm-l4-direct`
+  validate real vLLM serving performance in isolation. `vllm-t4-full-relay`/
+  `vllm-l4-full-relay` validate the actual thing a client would hit. Six
+  rows total; read the caveats in that file before quoting any of them out
+  of context (different concurrency levels between the T4 and L4 runs).
+- **Grafana dashboard**: **fixed 2026-08-16**. Checking panel queries
+  against real `/metrics` output found 3 of 10 stale
+  (`gpu_cache_usage_perc`, `cpu_cache_usage_perc`,
+  `time_per_output_token_seconds`); a second GPU run captured the full
+  real metric list and the dashboard now uses the actual current names:
+  `kv_cache_usage_perc` (renamed from `gpu_cache_usage_perc`),
+  prefix-cache hit rate in place of `cpu_cache_usage_perc` (this vLLM
+  version dropped CPU/swap cache tracking entirely — no direct
+  replacement exists, so the panel shows the closest real signal
+  instead), and `inter_token_latency_seconds` (renamed from
+  `time_per_output_token_seconds`). All three confirmed present in real
+  `/metrics` output from a live vLLM server — still not a rendered
+  screenshot, since the dashboard hasn't been pointed at a live
+  Prometheus+vLLM pair and viewed. Raw GPU compute utilization (SM%,
+  memory bandwidth) is **not** part of vLLM's native `/metrics` — that
+  requires a separate exporter (e.g. `dcgm-exporter` or
+  `nvidia_smi_exporter`) which is not included here; only
+  `kv_cache_usage_perc` (KV cache occupancy) comes from vLLM itself.
 
 ## Layout
 

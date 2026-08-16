@@ -9,6 +9,8 @@ Numbers labeled `stub-*` were measured against the local CPU stand-in server (se
 | vllm-t4-direct | 10 | 30 | 30 | 0 | 1.819 | 253.874 | 4921.2 | 6957.8 | 6958.7 | 104.8 | 2104.1 |
 | vllm-t4-direct | 30 | 60 | 60 | 0 | 2.678 | 385.077 | 10548.0 | 11796.7 | 11800.8 | 5249.4 | 6009.6 |
 | vllm-t4-full-relay | 5 | 15 | 15 | 0 | 1.444 | 151.537 | 2746.1 | 5037.3 | 5118.5 | 147.4 | 2240.9 |
+| vllm-l4-direct | 10 | 30 | 30 | 0 | 3.542 | 517.973 | 2724.2 | 3058.3 | 3060.7 | 57.3 | 408.7 |
+| vllm-l4-full-relay | 10 | 30 | 30 | 0 | 4.320 | 475.804 | 2148.3 | 2476.5 | 2524.8 | 89.1 | 377.3 |
 
 ## How `vllm-t4-full-relay` was produced (2026-08-15) — the real thing, end to end
 
@@ -48,6 +50,59 @@ written; the dashboard needs updating against the real metric names before
 its panels for those 3 would render. Not yet re-verified against a live
 Grafana instance (still just a curl comparison, not a screenshot) — see
 `PROJECT_STATUS.md`.
+
+## How `vllm-l4-direct` / `vllm-l4-full-relay` were produced (2026-08-16) — matched concurrency, real GPU class
+
+Same setup as the T4 runs above, but on a Hugging Face Jobs `l4x1` (1x
+NVIDIA L4, 24GB) — the GPU class `llm_serving/serve.sh` actually targets,
+not the cheapest-available T4 — and both the direct-vLLM and full-relay
+benchmarks run in the **same job at matched concurrency (10)**, closing
+both gaps the T4 runs left open. Engine args widened slightly to use the
+extra VRAM (`--max-model-len 4096 --gpu-memory-utilization 0.90
+--max-num-seqs 32` vs. the T4's 2048/0.85/16). Job total 389s (~$0.09 at
+$0.80/hr). Job id `srikarjy025/6a8112cfc97db76cbdf3297d`.
+
+**Real GPU-class comparison, same concurrency (10)**:
+
+| | TTFT p50 | TTFT p95 | total p50 |
+|---|---|---|---|
+| T4 direct | 104.8ms | 2104.1ms | 4921.2ms |
+| L4 direct | 57.3ms | 408.7ms | 2724.2ms |
+
+L4 roughly halves TTFT p50 and cuts TTFT p95 by ~5x — the T4's p95 tail is
+dominated by requests queuing behind `--max-num-seqs 16`'s tighter ceiling;
+L4's `--max-num-seqs 32` and extra VRAM/compute mostly avoid that at this
+concurrency. This is the number `llm_serving/serve.sh`'s engine-arg
+comments assumed but that was never actually measured before this run.
+
+**Real FastAPI-hop overhead, isolated at matched concurrency (10, L4
+only, direct vs. full-relay)**: TTFT p50 57.3ms → 89.1ms (+32ms), TTFT p95
+408.7ms → 377.3ms (within noise). The FastAPI route + SQLite query +
+prompt-building genuinely costs ~30ms of TTFT at this scale — small next
+to the model's own latency, and now a real measured number instead of an
+assumption.
+
+**Real metric names for the Grafana dashboard fix**: captured this run's
+full `/metrics` output and grepped for the 3 names that didn't match on
+2026-08-15 (`gpu_cache_usage_perc`, `cpu_cache_usage_perc`,
+`time_per_output_token_seconds`). Findings, now applied to
+`observability/grafana/dashboards/vllm-anomaly-explain.json`:
+- `gpu_cache_usage_perc` → renamed to `vllm:kv_cache_usage_perc`.
+- `cpu_cache_usage_perc` → **gone**, no replacement; this vLLM version
+  doesn't export a CPU/swap KV cache metric at all (automatic prefix
+  caching replaced the CPU-swap mechanism this metric was tracking). The
+  panel now shows prefix-cache hit rate instead
+  (`vllm:prefix_cache_hits_total` / `vllm:prefix_cache_queries_total`),
+  the closest real signal to what that panel was trying to show.
+- `time_per_output_token_seconds` → renamed to
+  `vllm:inter_token_latency_seconds` (a `request_time_per_output_token_seconds`
+  per-request variant also exists; `inter_token_latency_seconds` matches
+  the panel's original fleet-wide intent).
+
+Still not screenshotted against a live Grafana instance — the fix is
+applied and the metric names are confirmed to exist in real `/metrics`
+output, but the dashboard itself hasn't been pointed at a live
+Prometheus+vLLM pair and visually verified.
 
 ## How `vllm-t4-direct` was produced (2026-08-15)
 
@@ -109,23 +164,18 @@ bound port (either the stub server directly, or vLLM on GPU) via
 
 ## Still open
 
-- **A10G/L4-class numbers**: everything above ran on a T4, the cheapest HF
-  Jobs GPU flavor. The originally targeted class in `llm_serving/serve.sh`
-  is A10G/L4 (24GB vs. the T4's 16GB) — expect meaningfully better
-  TTFT/latency there. Re-run with `--flavor a10g-small` or `l4x1` for a
-  direct comparison.
-- **Matched-concurrency comparison** between `vllm-t4-direct` and
-  `vllm-t4-full-relay` (currently 10 vs. 5) to isolate the FastAPI-hop
-  overhead cleanly.
-- **Grafana dashboard fix**: update the 3 stale metric names found above
-  (`gpu_cache_usage_perc`, `cpu_cache_usage_perc`,
-  `time_per_output_token_seconds`) to whatever this vLLM version actually
-  exports, then verify the dashboard renders against a live Prometheus
-  scrape (not just a metric-name diff).
-- **Real Postgres in the loop**: this run used SQLite for speed of
-  standing up an ephemeral GPU box; production always uses Postgres, and
-  CI already exercises Postgres separately, but a from-scratch
+- **Live Grafana screenshot**: the 3 stale metric names are fixed in
+  `observability/grafana/dashboards/vllm-anomaly-explain.json` and
+  confirmed present in real `/metrics` output, but the dashboard hasn't
+  been pointed at a live Prometheus+vLLM pair and visually verified —
+  still just a metric-name diff, not a rendered screenshot.
+- **Real Postgres in the loop**: every GPU run so far used SQLite for
+  speed of standing up an ephemeral box; production always uses Postgres,
+  and CI already exercises Postgres separately, but a from-scratch
   GPU-host-with-Postgres run hasn't been done.
+- **A100/H200-class numbers**: not attempted — T4 and L4 are the cheapest
+  two HF Jobs GPU flavors and cover the "does GPU class matter" question;
+  bigger classes aren't part of this project's target deployment shape.
 
 ## Reproducing any of the `vllm-*` rows
 
