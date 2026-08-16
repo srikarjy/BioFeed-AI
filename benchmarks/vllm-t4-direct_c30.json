@@ -1,0 +1,20 @@
+{
+  "label": "vllm-t4-direct",
+  "concurrency": 30,
+  "requests_total": 60,
+  "requests_ok": 60,
+  "requests_failed": 0,
+  "wall_seconds": 22.403,
+  "req_per_sec": 2.678,
+  "tokens_per_sec": 385.077,
+  "p50_ms": 10548.0,
+  "p95_ms": 11796.7,
+  "p99_ms": 11800.8,
+  "ttft_p50_ms": 5249.4,
+  "ttft_p95_ms": 6009.6,
+  "sample_errors": [],
+  "model": "TheBloke/Mistral-7B-Instruct-v0.2-AWQ",
+  "hardware": "hf-jobs t4-small (1x T4, 16GB)",
+  "job_id": "srikarjy025/6a80fb241f5885ae605bbf35",
+  "measured_at": "2026-08-15T23:53:00Z"
+}

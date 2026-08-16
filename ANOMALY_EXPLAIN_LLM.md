@@ -21,13 +21,27 @@ everything added is additive and lives in `backend/app/anomaly/`,
   consume instead of a mocked schema. See `backend/app/anomaly/detector.py`
   for the exact heuristic and thresholds.
 - **LLM route**: real, tested against a local stand-in server.
-- **vLLM serving scripts**: real, but **not yet run against a real GPU** —
-  no rented GPU instance was available while building this. Scripts are
-  written and documented below; treat them as unverified until you run them.
-- **Benchmark numbers in `benchmarks/report.md`**: real numbers, but from a
-  local CPU stand-in (`scripts/stub_vllm_server.py`), not from vLLM or a
-  GPU. They validate the wiring (FastAPI route → SSE → client), not serving
-  performance. See the caveats in that file before quoting them anywhere.
+- **vLLM serving**: **verified on a real GPU (2026-08-15)** — the target
+  checkpoint (`TheBloke/Mistral-7B-Instruct-v0.2-AWQ`) served via
+  `vllm/vllm-openai` on a Hugging Face Jobs T4 (`hf jobs run --flavor
+  t4-small`), using the same engine args as `llm_serving/serve.sh`. 90/90
+  real streaming requests succeeded across two concurrency levels; real
+  TTFT p50 105ms at concurrency 10. See `benchmarks/report.md`
+  (`vllm-t4-direct`) for the full numbers, exact command, and what this
+  run does and doesn't cover — it hits vLLM directly, not through this
+  repo's FastAPI/SSE relay, since that would need the backend + Postgres
+  running on the same ephemeral GPU box (not attempted this pass). The
+  `llm_serving/` scripts themselves (SSH-based deployment to a rented
+  instance) are still unverified as written — the HF Jobs run used the
+  official `vllm/vllm-openai` image directly rather than
+  `download_model.sh`/`startup.sh`, though the underlying `serve.sh`
+  engine args are the same ones validated by this run.
+- **Benchmark numbers in `benchmarks/report.md`**: `stub-cpu-local` (CPU
+  stand-in) validates the wiring (FastAPI route → SSE → client), not
+  serving performance. `vllm-t4-direct` (real GPU, added 2026-08-15)
+  validates real vLLM serving performance, not the FastAPI/SSE wiring.
+  Neither row alone is the full picture — see the caveats in that file
+  before quoting either anywhere.
 - **Grafana dashboard**: panel queries use vLLM's actual native Prometheus
   metric names (`vllm:num_requests_running`, `vllm:gpu_cache_usage_perc`,
   `vllm:time_to_first_token_seconds`, etc.) but have not been screenshotted

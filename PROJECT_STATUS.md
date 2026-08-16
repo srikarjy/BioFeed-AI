@@ -149,12 +149,22 @@ market-signal module. Fully isolated in `app/anomaly/`, `app/llm/`,
 - `llm_serving/` — GPU-instance deployment scripts (download, serve,
   startup) for a self-hosted quantized model behind vLLM's OpenAI-compatible
   server.
-- **Honest caveat** (see [`ANOMALY_EXPLAIN_LLM.md`](./ANOMALY_EXPLAIN_LLM.md)):
-  the route and SSE wiring are tested against a local CPU stand-in server
-  (`scripts/stub_vllm_server.py`); the vLLM scripts and Grafana dashboard
-  have **not** been run against a real GPU — no rented instance was
-  available while building this. Benchmark numbers in `benchmarks/report.md`
-  validate the wiring, not serving performance, and are labeled as such.
+- **Honest caveat, updated 2026-08-15**: the route and SSE wiring are
+  tested against a local CPU stand-in server (`scripts/stub_vllm_server.py`);
+  `stub-cpu-local` benchmark numbers validate that wiring, not serving
+  performance. **vLLM itself is now verified on a real GPU**: this pass
+  ran `TheBloke/Mistral-7B-Instruct-v0.2-AWQ` via `vllm/vllm-openai` on a
+  Hugging Face Jobs T4 (`hf jobs run --flavor t4-small`, same engine args
+  as `llm_serving/serve.sh`), serving 90/90 real streaming requests with no
+  failures across two concurrency levels — real TTFT p50 105ms at
+  concurrency 10, degrading to p50 5.2s at concurrency 30 (a single T4's
+  `--max-num-seqs 16` ceiling, not a defect). Job cost ~$0.06. See
+  `benchmarks/report.md` (`vllm-t4-direct`) for the full numbers and
+  methodology. **Still not verified**: the same request through the actual
+  FastAPI/SSE relay on GPU (this run hit vLLM directly — see "Anomaly / LLM
+  remaining" below), and the Grafana dashboard against a live vLLM
+  `/metrics` endpoint (the ephemeral job's port wasn't exposed for external
+  scraping this pass).
 
 ---
 
@@ -172,10 +182,9 @@ market-signal module. Fully isolated in `app/anomaly/`, `app/llm/`,
 - [ ] Summaries and entity extraction (orgs, diseases, genes, drugs, funding
       events) — serves v0.8's knowledge graph and UX, not retrieval; still
       deferred on purpose.
-- [ ] Run `scripts/eval_retrieval.py` with `EMBEDDING_BACKEND=sentence-transformers`
-      (real PubMedBERT) and record the numbers next to the hashing-backend
-      baseline in `METRICS.md` — not yet done in this environment because
-      `sentence-transformers`/torch aren't installed outside Docker.
+- [x] ~~Run `scripts/eval_retrieval.py` with `EMBEDDING_BACKEND=sentence-transformers`~~
+      — done: Recall@5 1.000, Recall@10 1.000, NDCG@10 0.989 (vs. 0.962/1.000/0.959
+      for the hashing baseline). See `METRICS.md`.
 
 ### v0.7 remaining
 - [x] ~~Verify the training pipeline actually runs~~ — done this pass on
@@ -189,11 +198,16 @@ market-signal module. Fully isolated in `app/anomaly/`, `app/llm/`,
       started).
 
 ### Anomaly / LLM remaining
-- [ ] Run `llm_serving/` against a real GPU instance and re-verify the
-      Grafana dashboard and `benchmarks/report.md` numbers against it.
-      Candidate host: a Hugging Face GPU Space/Job under the project's HF
-      account, as an alternative to renting a bare GPU instance — not yet
-      attempted.
+- [x] ~~Run vLLM against a real GPU~~ — done 2026-08-15 on a Hugging Face
+      Jobs T4 (`hf jobs run --flavor t4-small`); real serving numbers in
+      `benchmarks/report.md` (`vllm-t4-direct`).
+- [ ] Benchmark the same request through the actual FastAPI/SSE relay
+      (this run hit vLLM directly) — needs the backend + Postgres running
+      alongside vLLM on the same GPU host, not attempted this pass.
+- [ ] Verify the Grafana dashboard against a live vLLM `/metrics` endpoint
+      (the ephemeral T4 job's port wasn't exposed for external scraping).
+- [ ] A10G/L4-class numbers for comparison against the T4 baseline above —
+      the originally targeted GPU class in `llm_serving/serve.sh`.
 
 ### v0.8 — Knowledge Graph
 - [ ] Entity relationship graph (company → disease → trial → drug → paper),
