@@ -1,0 +1,24 @@
+name: Open new issue
+on: workflow_dispatch
+
+jobs:
+  open-issue:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - run: |
+          gh issue --repo ${{ github.repository }} \
+            create --title "Finish Render deploy setup" --body "$(cat <<'EOF'
+          Account-bound steps for the live demo deploy (render.yaml), not doable from CI -- see README's "Live deployment" -> "One-time deploy setup":
+
+          - [ ] Create a GitHub PAT (classic, `read:packages` scope only)
+          - [ ] Add it as a Render Registry Credential named `biofeed-ai-ghcr`
+          - [ ] Render -> New -> Blueprint -> deploy from `render.yaml`
+          - [ ] Copy the deploy hook URL, store as the `RENDER_DEPLOY_HOOK_URL` GitHub Actions secret
+          - [ ] Once live: `curl -X POST https://biofeed-ai.onrender.com/ingest/run` once to seed real articles
+          EOF
+          )"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
