@@ -1,0 +1,24 @@
+databases:
+  - name: biofeed-ai-db
+    plan: free
+    postgresMajorVersion: "16"
+
+services:
+  - type: web
+    name: biofeed-ai
+    runtime: image
+    image:
+      url: ghcr.io/srikarjy/biofeed-ai/backend:latest
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: biofeed-ai-db
+          property: connectionString
+      - key: EMBEDDING_BACKEND
+        value: hash
+      - key: LLM_ENABLED
+        value: "false"
+      - key: AUTH_JWT_SECRET
+        generateValue: true

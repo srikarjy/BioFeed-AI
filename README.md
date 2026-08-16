@@ -1,5 +1,13 @@
 # BioFeed AI
 
+**🔗 Live demo: [biofeed-ai.onrender.com/demo](https://biofeed-ai.onrender.com/demo)**
+([API docs](https://biofeed-ai.onrender.com/docs)) — a free-tier deployment of
+the core service (search, recommendations, KG, auth). First request after
+idling can take 30–60s to wake the instance up. Runs with dependency-free hash
+embeddings, not the PubMedBERT quality in `METRICS.md` — see the demo page's
+banner and the [Live deployment](#live-deployment) section below for exactly
+what's traded off and why.
+
 A personalized biotech intelligence feed. A FastAPI service ingests biomedical
 literature and biotech news, embeds it with biomedical transformer models,
 and ranks it per-user with a two-tower retrieval model and a LightGBM
@@ -11,6 +19,27 @@ See [`BLUEPRINT.md`](./BLUEPRINT.md) for the full roadmap and resume framing,
 [`PROJECT_STATUS.md`](./PROJECT_STATUS.md) for what's built and the
 architecture decisions behind it, and [`METRICS.md`](./METRICS.md) for
 measured vs. target numbers.
+
+---
+
+## Try it in 60 seconds
+
+Against the live deployment, no clone required:
+
+```bash
+curl https://biofeed-ai.onrender.com/health
+curl -X POST https://biofeed-ai.onrender.com/ingest/run   # seed it with fresh articles if empty
+curl "https://biofeed-ai.onrender.com/search?q=CRISPR%20sickle%20cell"
+```
+
+Or locally, with the real PubMedBERT embedder and the full stack:
+
+```bash
+docker compose up --build
+curl http://localhost:8000/health
+curl -X POST http://localhost:8000/ingest/run
+curl "http://localhost:8000/search?q=CRISPR%20sickle%20cell"
+```
 
 ---
 
@@ -102,6 +131,45 @@ standalone for a full per-query report:
 cd backend
 EMBEDDING_BACKEND=hash python scripts/eval_retrieval.py
 ```
+
+## Live deployment
+
+The demo at [biofeed-ai.onrender.com](https://biofeed-ai.onrender.com/demo)
+runs the exact image CI publishes to GHCR (`.github/workflows/docker.yml`),
+deployed via [`render.yaml`](./render.yaml) — a Render Blueprint (free web
+service + free Postgres/pgvector). CI pings Render's deploy hook after every
+push to `main`, so the live demo tracks the repo automatically; nothing about
+it is deployed or updated by hand.
+
+What's different from a full local/prod run, and why:
+
+- **`EMBEDDING_BACKEND=hash`**, not `sentence-transformers` — the real
+  PubMedBERT embedder needs more RAM than a free-tier instance has. The
+  hashing embedder (`app/ml/embeddings.py`) is deterministic and
+  dependency-free but not semantically meaningful, so search/related-article
+  results on the live demo are topically rough, not the retrieval quality
+  reported in `METRICS.md`. Locally/in production this flips back to real
+  embeddings with one env var.
+- **`LLM_ENABLED=false`** — the self-hosted vLLM anomaly-explanation feature
+  needs a real GPU instance running continuously, which is real ongoing
+  spend, not a one-off cost. It's verified separately on a real GPU (see
+  [`ANOMALY_EXPLAIN_LLM.md`](./ANOMALY_EXPLAIN_LLM.md)) rather than kept live
+  here.
+- **Auth stays on `AUTH_PROVIDER=fake`** (the default — see
+  `app/auth/config.py` and `app/auth/providers.py`). Real Sign in with
+  Apple/Google needs a registered app and device-minted tokens that don't
+  exist without the (roadmap, spend-gated) mobile client. The fake provider
+  isn't a shortcut around auth — it exercises the *real* token
+  issuance/refresh/`require_self`-enforcement code path end to end, just
+  against a self-issued identity claim instead of Apple/Google's. The
+  `/demo` page uses this to sign in a fresh demo user
+  (`POST /auth/apple` with a `{"sub": "..."}` identity token) and get a real
+  JWT before calling the auth-protected `/users/{id}/feed` and
+  `/users/{id}/articles/{id}/explain` routes. A production deploy sets
+  `AUTH_PROVIDER=real` plus `AUTH_APPLE_CLIENT_ID`/`AUTH_GOOGLE_CLIENT_ID`
+  once those app registrations exist — nothing defaults to `real`, so a
+  misconfigured deployment fails closed rather than silently trusting
+  anything.
 
 ## Repo structure
 

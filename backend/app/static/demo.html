@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>BioFeed AI — live demo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #0b0e14;
+    --panel: #131722;
+    --border: #262b3a;
+    --text: #e6e9f0;
+    --muted: #8b93a7;
+    --accent: #5eead4;
+    --accent-dim: #1c3f3a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    padding: 2rem 1.25rem 4rem;
+  }
+  main { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin: 0 0 0.25rem; }
+  .sub { color: var(--muted); margin: 0 0 1.25rem; font-size: 0.92rem; }
+  .notice {
+    background: var(--accent-dim);
+    border: 1px solid #2a5a52;
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    font-size: 0.85rem;
+    margin-bottom: 1.75rem;
+    color: #b9f5e8;
+  }
+  .notice a { color: var(--accent); }
+  section {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.1rem 1.25rem;
+    margin-bottom: 1rem;
+  }
+  section h2 {
+    font-size: 0.95rem;
+    margin: 0 0 0.15rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  section .desc { color: var(--muted); font-size: 0.82rem; margin: 0 0 0.85rem; }
+  .row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+  input, button {
+    font: inherit;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    padding: 0.45rem 0.7rem;
+  }
+  input {
+    background: #0d1119;
+    color: var(--text);
+    flex: 1;
+    min-width: 140px;
+  }
+  button {
+    background: var(--accent);
+    color: #06201c;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+  }
+  button.secondary {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+    font-weight: 500;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  pre {
+    background: #0d1119;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.75rem;
+    overflow-x: auto;
+    font-size: 0.8rem;
+    max-height: 320px;
+    margin: 0;
+  }
+  .status { font-size: 0.78rem; color: var(--muted); margin-bottom: 0.4rem; min-height: 1em; }
+  .status.err { color: #f88; }
+  .cards { display: flex; flex-direction: column; gap: 0.5rem; }
+  .card {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.55rem 0.7rem;
+    font-size: 0.85rem;
+  }
+  .card .meta { color: var(--muted); font-size: 0.75rem; margin-top: 0.2rem; }
+  .card button { margin-top: 0.4rem; padding: 0.25rem 0.55rem; font-size: 0.75rem; }
+  footer { text-align: center; color: var(--muted); font-size: 0.78rem; margin-top: 2rem; }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>BioFeed AI — live demo</h1>
+  <p class="sub">Hitting the real, deployed API in your browser — every request below is a live call, nothing here is mocked.</p>
+
+  <div class="notice">
+    This free-tier deployment runs with <code>EMBEDDING_BACKEND=hash</code> (deterministic,
+    dependency-free token-hashing) instead of the real PubMedBERT model reported in
+    <code>METRICS.md</code>, so search/related-article results are topically rough, not
+    true semantic matches — a RAM tradeoff for a $0/mo host. The self-hosted vLLM
+    anomaly-explanation feature is <strong>not</strong> live here (real GPU spend); it was
+    verified separately on a real GPU — see <code>ANOMALY_EXPLAIN_LLM.md</code> in the repo.
+    First request after idling may take 30–60s to wake the free instance up.
+  </div>
+
+  <section id="sec-health">
+    <h2>Health check</h2>
+    <p class="desc">GET /health</p>
+    <div class="row"><button onclick="run('health')">Ping</button></div>
+    <div class="status" id="health-status"></div>
+    <pre id="health-out">—</pre>
+  </section>
+
+  <section id="sec-search">
+    <h2>Semantic search</h2>
+    <p class="desc">GET /search?q=... — real pgvector similarity search over ingested articles</p>
+    <div class="row">
+      <input id="search-q" placeholder="e.g. CRISPR sickle cell" value="CRISPR" />
+      <button onclick="run('search')">Search</button>
+    </div>
+    <div class="status" id="search-status"></div>
+    <div class="cards" id="search-out"></div>
+  </section>
+
+  <section id="sec-articles">
+    <h2>Browse ingested articles</h2>
+    <p class="desc">GET /articles — most recently ingested, with a "related" tap-through</p>
+    <div class="row"><button onclick="run('articles')">Load latest</button></div>
+    <div class="status" id="articles-status"></div>
+    <div class="cards" id="articles-out"></div>
+  </section>
+
+  <section id="sec-kg">
+    <h2>Knowledge graph entities</h2>
+    <p class="desc">GET /kg/entities — ontology-grounded (MONDO/HPO/ChEMBL/HGNC) entities extracted from ingested text</p>
+    <div class="row"><button onclick="run('kg')">Load entities</button></div>
+    <div class="status" id="kg-status"></div>
+    <div class="cards" id="kg-out"></div>
+  </section>
+
+  <section id="sec-feed">
+    <h2>Personalized feed &amp; explanation</h2>
+    <p class="desc">
+      POST /auth/apple (fake identity provider, dev/test path — real deployments verify
+      Sign in with Apple/Google JWKS) → GET /users/{id}/feed → GET /users/{id}/articles/{id}/explain.
+      A fresh demo user has no interaction history, so the feed starts in cold-start
+      (content-similarity) mode — labeled honestly below, not hidden.
+    </p>
+    <div class="row">
+      <button onclick="signIn()">1. Sign in as new demo user</button>
+      <button class="secondary" onclick="run('feed')" id="feed-btn" disabled>2. Get my feed</button>
+    </div>
+    <div class="status" id="feed-status"></div>
+    <div class="cards" id="feed-out"></div>
+  </section>
+
+  <footer>
+    <a href="/docs" target="_blank">Full API reference (/docs)</a> ·
+    <a href="https://github.com/srikarjy/BioFeed-AI" target="_blank">Source</a>
+  </footer>
+</main>
+
+<script>
+const state = { token: null, userId: null };
+
+function setStatus(id, msg, isErr) {
+  const el = document.getElementById(id + '-status');
+  if (el) { el.textContent = msg; el.className = 'status' + (isErr ? ' err' : ''); }
+}
+
+function show(id, obj) {
+  const el = document.getElementById(id + '-out');
+  if (el) el.textContent = JSON.stringify(obj, null, 2);
+}
+
+function cardsHtml(items, render) {
+  return items.length ? items.map(render).join('') : '<div class="card">No results.</div>';
+}
+
+async function api(path, opts) {
+  const headers = Object.assign({ 'Content-Type': 'application/json' }, (opts && opts.headers) || {});
+  if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
+  const res = await fetch(path, Object.assign({}, opts, { headers }));
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body && body.detail) ? JSON.stringify(body.detail) : res.statusText);
+  return body;
+}
+
+async function run(kind) {
+  try {
+    if (kind === 'health') {
+      setStatus('health', 'loading…');
+      const out = await api('/health');
+      setStatus('health', 'ok');
+      show('health', out);
+    }
+    if (kind === 'search') {
+      const q = document.getElementById('search-q').value.trim();
+      setStatus('search', 'loading…');
+      const out = await api('/search?q=' + encodeURIComponent(q) + '&limit=8');
+      setStatus('search', out.length + ' result(s)');
+      document.getElementById('search-out').innerHTML = cardsHtml(out, a =>
+        `<div class="card"><strong>${escapeHtml(a.title)}</strong>
+         <div class="meta">${escapeHtml(a.source || '')} · similarity ${a.similarity?.toFixed?.(3) ?? a.similarity}</div></div>`);
+    }
+    if (kind === 'articles') {
+      setStatus('articles', 'loading…');
+      const out = await api('/articles?limit=8');
+      setStatus('articles', out.length + ' article(s) — click one to load related');
+      document.getElementById('articles-out').innerHTML = cardsHtml(out, a =>
+        `<div class="card"><strong>${escapeHtml(a.title)}</strong>
+         <div class="meta">${escapeHtml(a.source || '')}</div>
+         <button class="secondary" onclick="related(${a.id})">Find related</button>
+         <div id="related-${a.id}"></div></div>`);
+    }
+    if (kind === 'kg') {
+      setStatus('kg', 'loading…');
+      const out = await api('/kg/entities?limit=20');
+      setStatus('kg', out.length + ' entities(s)');
+      document.getElementById('kg-out').innerHTML = cardsHtml(out, e =>
+        `<div class="card"><strong>${escapeHtml(e.name)}</strong>
+         <div class="meta">${escapeHtml(e.entity_type || '')} · ${escapeHtml(e.external_id || 'ungrounded')}</div></div>`);
+    }
+    if (kind === 'feed') {
+      setStatus('feed', 'loading…');
+      const out = await api(`/users/${state.userId}/feed?limit=6`);
+      setStatus('feed', (out.cold_start ? 'cold start (no history yet)' : 'personalized') + ` · ${out.items.length} item(s)`);
+      document.getElementById('feed-out').innerHTML = cardsHtml(out.items, it =>
+        `<div class="card"><strong>${escapeHtml(it.article.title)}</strong>
+         <div class="meta">${escapeHtml(it.reason || '')} · similarity ${it.similarity}</div>
+         <button onclick="explain(${it.article.id})">Why this? (/explain)</button>
+         <div id="explain-${it.article.id}"></div></div>`);
+    }
+  } catch (e) {
+    setStatus(kind, 'error: ' + e.message, true);
+  }
+}
+
+async function related(articleId) {
+  try {
+    const out = await api(`/articles/${articleId}/related?limit=5`);
+    document.getElementById('related-' + articleId).innerHTML =
+      '<pre>' + escapeHtml(JSON.stringify(out.map(a => a.title), null, 2)) + '</pre>';
+  } catch (e) {
+    document.getElementById('related-' + articleId).textContent = 'error: ' + e.message;
+  }
+}
+
+async function explain(articleId) {
+  try {
+    const out = await api(`/users/${state.userId}/articles/${articleId}/explain`);
+    document.getElementById('explain-' + articleId).innerHTML =
+      '<pre>' + escapeHtml(JSON.stringify(out, null, 2)) + '</pre>';
+  } catch (e) {
+    document.getElementById('explain-' + articleId).textContent = 'error: ' + e.message;
+  }
+}
+
+async function signIn() {
+  try {
+    setStatus('feed', 'signing in…');
+    const sub = 'demo-' + Math.random().toString(36).slice(2, 10);
+    const identity_token = JSON.stringify({ sub, email: sub + '@example.com' });
+    const out = await api('/auth/apple', {
+      method: 'POST',
+      body: JSON.stringify({ identity_token, display_name: 'Demo Visitor' }),
+    });
+    state.token = out.access_token;
+    state.userId = out.user.id;
+    document.getElementById('feed-btn').disabled = false;
+    setStatus('feed', `signed in as demo user #${state.userId} (via the app's fake identity provider — see AuthSettings)`);
+  } catch (e) {
+    setStatus('feed', 'error: ' + e.message, true);
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+</script>
+</body>
+</html>
