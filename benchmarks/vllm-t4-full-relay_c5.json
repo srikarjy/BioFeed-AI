@@ -1,0 +1,21 @@
+{
+  "label": "vllm-t4-full-relay",
+  "concurrency": 5,
+  "requests_total": 15,
+  "requests_ok": 15,
+  "requests_failed": 0,
+  "wall_seconds": 10.387,
+  "throughput_req_per_sec": 1.444,
+  "throughput_tokens_per_sec": 151.537,
+  "latency_p50_ms": 2746.1,
+  "latency_p95_ms": 5037.3,
+  "latency_p99_ms": 5118.5,
+  "ttft_p50_ms": 147.4,
+  "ttft_p95_ms": 2240.9,
+  "sample_errors": [],
+  "model": "TheBloke/Mistral-7B-Instruct-v0.2-AWQ",
+  "hardware": "hf-jobs t4-small (1x T4, 16GB), backend + vLLM in the same container, SQLite DB",
+  "path": "real FastAPI route -> app/llm/client.py -> real vLLM -> SSE relay (no stand-ins)",
+  "job_id": "srikarjy025/6a810b7a1f5885ae605bc20a",
+  "measured_at": "2026-08-16T01:05:53Z"
+}

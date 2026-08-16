@@ -149,22 +149,30 @@ market-signal module. Fully isolated in `app/anomaly/`, `app/llm/`,
 - `llm_serving/` — GPU-instance deployment scripts (download, serve,
   startup) for a self-hosted quantized model behind vLLM's OpenAI-compatible
   server.
-- **Honest caveat, updated 2026-08-15**: the route and SSE wiring are
-  tested against a local CPU stand-in server (`scripts/stub_vllm_server.py`);
-  `stub-cpu-local` benchmark numbers validate that wiring, not serving
-  performance. **vLLM itself is now verified on a real GPU**: this pass
-  ran `TheBloke/Mistral-7B-Instruct-v0.2-AWQ` via `vllm/vllm-openai` on a
-  Hugging Face Jobs T4 (`hf jobs run --flavor t4-small`, same engine args
-  as `llm_serving/serve.sh`), serving 90/90 real streaming requests with no
-  failures across two concurrency levels — real TTFT p50 105ms at
-  concurrency 10, degrading to p50 5.2s at concurrency 30 (a single T4's
-  `--max-num-seqs 16` ceiling, not a defect). Job cost ~$0.06. See
-  `benchmarks/report.md` (`vllm-t4-direct`) for the full numbers and
-  methodology. **Still not verified**: the same request through the actual
-  FastAPI/SSE relay on GPU (this run hit vLLM directly — see "Anomaly / LLM
-  remaining" below), and the Grafana dashboard against a live vLLM
-  `/metrics` endpoint (the ephemeral job's port wasn't exposed for external
-  scraping this pass).
+- **Honest caveat, updated 2026-08-16**: the route and SSE wiring were
+  first tested against a local CPU stand-in server
+  (`scripts/stub_vllm_server.py`); `stub-cpu-local` benchmark numbers
+  validate that wiring, not serving performance.
+  **Now verified for real, twice**: (1) vLLM itself on a real GPU
+  (`vllm-t4-direct` — `TheBloke/Mistral-7B-Instruct-v0.2-AWQ` via
+  `vllm/vllm-openai` on a Hugging Face Jobs T4, 90/90 real streaming
+  requests, TTFT p50 105ms at concurrency 10, ~$0.06); (2) **the actual
+  product path end to end** (`vllm-t4-full-relay` — real FastAPI backend
+  and real vLLM in the same GPU job, `GET /internal/anomaly-explain/{id}`
+  → `app/llm/client.py` → real vLLM → SSE back to the caller, no
+  stand-ins anywhere; 15/15 requests, TTFT p50 147ms; ~$0.04). See
+  `benchmarks/report.md` for full numbers and methodology on both.
+  Getting the full relay running on GPU required a real fix first: a bare
+  SQLite `DATABASE_URL` crashes a real `uvicorn` process (threadpool +
+  single-threaded sqlite3 connection) unless the engine is configured with
+  `check_same_thread=False` + `StaticPool` — `app/database.py` now does
+  this automatically for any `sqlite://` URL; production still always uses
+  Postgres. **Grafana dashboard**: checked (not screenshotted) against the
+  same run's real `/metrics` output — 7 of 10 panel metric names match, 3
+  don't (`gpu_cache_usage_perc`, `cpu_cache_usage_perc`,
+  `time_per_output_token_seconds` — likely renamed in a newer vLLM
+  release), a real, previously-unknown gap now documented instead of
+  assumed correct.
 
 ### v0.3 — Authentication ✅ (backend; no iOS client to actually run it against)
 
@@ -285,16 +293,26 @@ none of this reintroduced the unconditional-heavy-import bug.
       started).
 
 ### Anomaly / LLM remaining
-- [x] ~~Run vLLM against a real GPU~~ — done 2026-08-15 on a Hugging Face
-      Jobs T4 (`hf jobs run --flavor t4-small`); real serving numbers in
-      `benchmarks/report.md` (`vllm-t4-direct`).
-- [ ] Benchmark the same request through the actual FastAPI/SSE relay
-      (this run hit vLLM directly) — needs the backend + Postgres running
-      alongside vLLM on the same GPU host, not attempted this pass.
-- [ ] Verify the Grafana dashboard against a live vLLM `/metrics` endpoint
-      (the ephemeral T4 job's port wasn't exposed for external scraping).
-- [ ] A10G/L4-class numbers for comparison against the T4 baseline above —
+- [x] ~~Run vLLM against a real GPU~~ — done 2026-08-15 (`vllm-t4-direct`).
+- [x] ~~Benchmark through the actual FastAPI/SSE relay on GPU~~ — done
+      2026-08-16 (`vllm-t4-full-relay`): real backend + real vLLM, same GPU
+      job, no stand-ins. See `benchmarks/report.md`.
+- [x] ~~Check the Grafana dashboard's metric names against real vLLM
+      `/metrics`~~ — done: 3 of 10 don't match this vLLM version
+      (`gpu_cache_usage_perc`, `cpu_cache_usage_perc`,
+      `time_per_output_token_seconds`), now documented.
+- [ ] Fix the 3 stale metric names in
+      `observability/grafana/dashboards/vllm-anomaly-explain.json` and
+      verify the dashboard actually renders against a live Prometheus
+      scrape (a metric-name diff isn't a screenshot).
+- [ ] A10G/L4-class numbers for comparison against the T4 baselines above —
       the originally targeted GPU class in `llm_serving/serve.sh`.
+- [ ] Re-run `vllm-t4-direct` and `vllm-t4-full-relay` at matched
+      concurrency to isolate the FastAPI-hop overhead cleanly (currently
+      10 vs. 5).
+- [ ] A from-scratch GPU-host run with real Postgres in the loop (this
+      pass used SQLite on the GPU box for setup speed; Postgres is already
+      exercised separately in CI, but not together with a live GPU).
 
 ### v0.8 remaining
 - [ ] Expand the gazetteer beyond ~30 hand-curated entities (or add a real
@@ -365,6 +383,7 @@ none of this reintroduced the unconditional-heavy-import bug.
 | 30 | **`Article.kg_extracted_at` instead of "has an EntityMention row" as the backfill signal** | An article can legitimately match zero gazetteer entities. Keying the backfill query off mention-row existence would rescan every zero-match article on every run forever; an explicit processed-timestamp (mirroring how embeddings use a nullable column, not a side table) fixes it. Caught before shipping, not after. |
 | 31 | **Relations are same-article co-occurrence with type-informed predicates, labeled as a heuristic** | No relation-extraction model exists in this stack. Labeling edges `develops`/`targets`/`co_mentioned_with` by entity-type pair is a legible, cheap heuristic — but it's still just co-occurrence, and the model/service docstrings say so directly rather than implying a verified biological claim. |
 | 32 | **`app/ml/signals.py` split out of `reranker.py`** | `explain.py` needed the same user/item signal functions reranker.py already had, but importing reranker.py would pull numpy+lightgbm into the always-loaded `/users` router's import path — the exact bug class fixed for v0.7 (decision #22). Splitting the pure-Python signal functions into their own module lets both consume them without either paying that cost. |
+| 33 | **`app/database.py` auto-detects `sqlite://` and configures `check_same_thread=False` + `StaticPool`** | Discovered running the full FastAPI/SSE relay on a GPU job without Postgres available: a real `uvicorn` process runs sync path operations in a threadpool, and a bare SQLite connection can't cross threads, so the app crashed on the first request. Production always used Postgres so this never surfaced. Fixing it in `app/database.py` (rather than requiring every ad-hoc script to know the workaround, as `tests/conftest.py` and `scripts/seed_v07_synthetic.py` each independently did/needed) makes any future SQLite-backed run — tests, scripts, or a quick verification job — correct by default. |
 
 ---
 
