@@ -72,7 +72,7 @@ with a labeled retrieval eval set, JWT auth with pluggable Apple/Google
 verification, a knowledge graph grounded in real ontology identifiers, and
 structured multi-signal recommendation explanations. Plus an additive
 anomaly detection + self-hosted LLM explanation feature, verified on a real
-GPU. 73 backend tests passing. See `PROJECT_STATUS.md` for the full
+GPU. 77 backend tests passing. See `PROJECT_STATUS.md` for the full
 breakdown and what's next (mobile app, market-signal module — both gated
 on real spend/an Apple Developer account, not remaining engineering work).
 

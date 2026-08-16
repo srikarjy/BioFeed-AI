@@ -14,6 +14,7 @@ from app.ml.signals import (
     compute_freshness_days,
     compute_item_popularity,
     compute_user_affinities,
+    topic_affinity_score,
     get_user_stats,
 )
 from app.models import Article, User, UserInteraction, UserEmbedding
@@ -37,7 +38,7 @@ FEATURE_NAMES = [
     "item_has_doi",           # Whether article has DOI
     "item_has_embedding",     # Whether article has embedding
     # Cross features
-    "user_topic_affinity",    # User's affinity for article's dominant topic
+    "user_topic_affinity",    # User's affinity for the article's KG entities (app.kg)
     "user_source_affinity",   # User's affinity for article's source
 ]
 
@@ -50,27 +51,27 @@ def extract_features(
     item_emb: Optional[np.ndarray],
     user_item_cosine: float,
     user_item_dot: float,
-    topic_affinity: dict[str, float],
+    topic_affinity: dict[int, float],
     source_affinity: dict[str, float],
     user_stats: dict,
 ) -> np.ndarray:
     """Extract feature vector for a user-article pair."""
-    
+
     # User features
     user_interaction_count = user_stats.get("interaction_count", 0)
     user_avg_read_time = user_stats.get("avg_read_time", 0.0)
     user_bookmark_rate = user_stats.get("bookmark_rate", 0.0)
     user_like_rate = user_stats.get("like_rate", 0.0)
-    
+
     # Item features
     freshness = compute_freshness_days(article.published_at)
     popularity = compute_item_popularity(db, article.id)
     source_quality = compute_source_quality(article.source)
     has_doi = 1.0 if article.doi else 0.0
     has_embedding = 1.0 if article.embedding is not None else 0.0
-    
+
     # Cross features
-    user_topic_aff = topic_affinity.get(article.source, 0.0)
+    user_topic_aff = topic_affinity_score(db, article, topic_affinity)
     user_source_aff = source_affinity.get(article.source, 0.0)
     
     features = np.array([

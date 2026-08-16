@@ -253,10 +253,20 @@ market-signal module. Fully isolated in `app/anomaly/`, `app/llm/`,
   zero gazetteer entities doesn't get rescanned by every backfill forever
   — a real gap the first draft of `article_ids_missing_extraction` had
   (using "no EntityMention row" as the signal), fixed before it shipped.
-- Gazetteer expanded 30 → 49 entities (2026-08-16: +8 disease, +4 gene, +7
-  company; ChEMBL's API was down for the drug lookups that day — see
-  `gazetteer.json`'s `_provenance`).
+- Gazetteer expanded 30 → 54 entities (2026-08-16: +8 disease, +4 gene, +7
+  company, +5 drug — the drug entries added once ChEMBL's API, briefly
+  down earlier the same day, recovered; see `gazetteer.json`'s
+  `_provenance`).
 - 19 tests (`tests/test_kg.py`, was 13).
+
+### v0.9 signals fix (2026-08-16)
+
+Beyond the initial v0.9 explanation feature, closed the documented
+`compute_user_affinities` gap this same pass: `topic_affinity` is now
+keyed by real KG entity id instead of proxying article source, and a new
+`topic_affinity_score` sums it per candidate article — see "v0.9
+remaining" for the detail and the test that would have caught the old
+behavior.
 
 ### v0.9 — Explainable AI ✅
 
@@ -281,7 +291,7 @@ market-signal module. Fully isolated in `app/anomaly/`, `app/llm/`,
   proactively instead of after breaking something.
 - 8 tests (`tests/test_explain.py`).
 
-**73 tests passing overall (was 35 before this pass)**, including a clean
+**77 tests passing overall (was 35 before this pass)**, including a clean
 venv built from `requirements.txt` alone (no torch/lightgbm) to confirm
 none of this reintroduced the unconditional-heavy-import bug.
 
@@ -349,13 +359,13 @@ none of this reintroduced the unconditional-heavy-import bug.
       exercised separately in CI, but not together with a live GPU).
 
 ### v0.8 remaining
-- [x] ~~Expand the gazetteer~~ — 30 → 49 entities (2026-08-16): +8 disease
-      (MONDO), +4 gene (HGNC), +7 company. No new drug entries added —
-      ChEMBL's API was returning HTTP 500 for both `/molecule/search` and
-      `/molecule.json` during this pass (confirmed transient/upstream,
-      previously-working queries also failed that day), so nothing could
-      be live-verified; documented in `gazetteer.json`'s `_provenance`
-      rather than skipped silently.
+- [x] ~~Expand the gazetteer~~ — 30 → 54 entities across two passes
+      (2026-08-16): +8 disease (MONDO), +4 gene (HGNC), +7 company
+      first (ChEMBL's API was returning HTTP 500 for both
+      `/molecule/search` and `/molecule.json` at the time, confirmed
+      transient/upstream — previously-working queries also failed that
+      day); +5 drug entries (lecanemab, donanemab, elranatamab,
+      trastuzumab, adalimumab) once ChEMBL recovered later the same day.
 - [x] ~~Ground `trial` entities (NCT ids)~~ — done: `app/kg/trials.py`
       extracts NCT ids via regex and looks up the real title from
       ClinicalTrials.gov's public API live, per-article, only for NCT ids
@@ -367,17 +377,29 @@ none of this reintroduced the unconditional-heavy-import bug.
       fetcher so CI doesn't depend on network access; the real fetcher was
       separately verified against the live API
       (`fetch_trial_title("NCT04173585")` → a real trial title).
-- [ ] Retry the ChEMBL drug-entity expansion once the API is stable again.
-- [ ] Still only ~49 hand-curated + dynamically-grounded trial entities —
+- [ ] Still only ~54 hand-curated + dynamically-grounded trial entities —
       a trained NER model as a second extraction pass would catch entities
       outside the gazetteer entirely; still deferred, see extractor.py.
 
 ### v0.9 remaining
 - [ ] Surface the structured explanation in a UI once v0.4 exists — right
       now it's a real, tested JSON endpoint with no client consuming it.
-- [ ] Replace the source-affinity-as-topic-affinity proxy (see
-      `app/ml/signals.compute_user_affinities`) with a real per-article
-      topic derived from v0.8 KG entities, now that entities exist.
+- [x] ~~Replace the source-affinity-as-topic-affinity proxy with a real
+      per-article topic derived from v0.8 KG entities~~ — done 2026-08-16:
+      `compute_user_affinities` now returns `topic_affinity` keyed by KG
+      entity id (weighted by how often each entity appears across the
+      user's positively-interacted articles), and a new
+      `topic_affinity_score(db, article, topic_affinity)` sums those
+      weights for a candidate article's actual entities. Wired into both
+      the v0.7 reranker's `extract_features` (replacing
+      `topic_affinity.get(article.source, 0.0)`) and the v0.9 explanation
+      builder (new `topic_affinity` signal). Degrades to `{}`/`0.0`
+      cleanly when KG extraction hasn't run on an article yet — no crash,
+      just no signal. 4 new tests (`tests/test_signals.py`), including one
+      that would have failed under the old source-proxy behavior (two
+      articles from *different* sources both mentioning Moderna now score
+      real affinity overlap; the old signal could never see that since
+      different source strings never overlapped).
 
 ### v1.0 — Production Release
 - [ ] Full ingestion + auth + personalized feed + search + bookmarks +

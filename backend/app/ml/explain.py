@@ -34,6 +34,7 @@ from app.ml.signals import (
     compute_item_popularity,
     compute_source_quality,
     compute_user_affinities,
+    topic_affinity_score,
 )
 from app.models import Article
 
@@ -103,6 +104,16 @@ def build_explanation(db: Session, user_id: int, article: Article) -> Explanatio
                 label="source_affinity",
                 detail=f"{round(source_aff * 100, 1)}% of your positive interactions are with {article.source}",
                 weight=round(source_aff, 3),
+            )
+        )
+
+    topic_aff = topic_affinity_score(db, article, topic_affinity)
+    if topic_aff > 0:
+        signals.append(
+            ExplanationSignal(
+                label="topic_affinity",
+                detail=f"overlaps with topics ({round(topic_aff * 100, 1)}% affinity) from your interaction history",
+                weight=round(min(topic_aff, 1.0), 3),
             )
         )
 

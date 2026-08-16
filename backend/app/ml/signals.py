@@ -56,15 +56,21 @@ def compute_item_popularity(db: Session, article_id: int) -> int:
     return db.query(UserInteraction).filter(UserInteraction.article_id == article_id).count()
 
 
-def compute_user_affinities(db: Session, user_id: int) -> tuple[dict[str, float], dict[str, float]]:
+def compute_user_affinities(db: Session, user_id: int) -> tuple[dict[int, float], dict[str, float]]:
     """User's topic and source affinities from interaction history.
 
-    Topic affinity is currently source-as-proxy (same values as source
-    affinity) -- a real topic model needs entity/topic tagging per article,
-    which v0.8's knowledge graph now provides the entities for but nothing
-    here consumes yet. See PROJECT_STATUS.md "v0.9 remaining."
+    `topic_affinity` is keyed by KG entity id (see app.kg), weighted by how
+    often each entity appears across the user's positively-interacted
+    articles -- real per-article topics, not the source-as-proxy this used
+    to be before v0.8's knowledge graph existed to tag articles with
+    anything finer-grained than their source. An article with no KG
+    entities (nothing in the gazetteer matched, or extraction hasn't run
+    yet) contributes nothing to `topic_affinity` but still counts toward
+    `source_affinity`. Use `topic_affinity_score` to turn this dict into a
+    per-candidate-article score.
     """
     from app import crud
+    from app.kg import crud as kg_crud
 
     interactions = crud.get_user_positive_interactions(db, user_id, limit=500)
     if not interactions:
@@ -74,14 +80,33 @@ def compute_user_affinities(db: Session, user_id: int) -> tuple[dict[str, float]
     articles = db.query(Article).filter(Article.id.in_(article_ids)).all()
 
     source_counts: dict[str, int] = {}
+    entity_counts: dict[int, int] = {}
     for art in articles:
         source_counts[art.source] = source_counts.get(art.source, 0) + 1
+        for entity in kg_crud.get_article_entities(db, art.id):
+            entity_counts[entity.id] = entity_counts.get(entity.id, 0) + 1
 
-    total = sum(source_counts.values())
-    source_affinity = {k: v / total for k, v in source_counts.items()}
-    topic_affinity = source_affinity.copy()
+    source_total = sum(source_counts.values())
+    source_affinity = {k: v / source_total for k, v in source_counts.items()}
+
+    entity_total = sum(entity_counts.values())
+    topic_affinity = {k: v / entity_total for k, v in entity_counts.items()} if entity_total else {}
 
     return topic_affinity, source_affinity
+
+
+def topic_affinity_score(db: Session, article: Article, topic_affinity: dict[int, float]) -> float:
+    """Sum of the user's topic-affinity weights for KG entities mentioned
+    in `article` -- how much this article overlaps with what the user has
+    shown interest in, by real entity rather than by source. 0 if the
+    article has no KG entities extracted yet, or none overlap.
+    """
+    if not topic_affinity:
+        return 0.0
+    from app.kg import crud as kg_crud
+
+    entities = kg_crud.get_article_entities(db, article.id)
+    return sum(topic_affinity.get(e.id, 0.0) for e in entities)
 
 
 def get_user_stats(db: Session, user_id: int) -> dict:
