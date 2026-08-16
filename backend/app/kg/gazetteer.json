@@ -1,0 +1,37 @@
+{
+  "_provenance": "Every non-company entry's external_id was looked up live against the source ontology's public API during development (EBI OLS4 for MONDO/HPO, EBI ChEMBL for drugs, genenames.org REST for HGNC) -- not invented. Re-verify with e.g. `curl https://www.ebi.ac.uk/ols4/api/search?q=<term>&ontology=mondo`. Company entries are self-grounding (real company names); tickers are public and easy to independently verify. This is a deliberately small, hand-curated set -- see app/kg/README.md for why a dictionary matcher over a curated gazetteer, not full UMLS/MONDO ingestion or a trained NER model, was the right scope for this pass.",
+  "entities": [
+    {"name": "sickle cell disease", "type": "disease", "external_source": "MONDO", "external_id": "MONDO:0011382", "aliases": ["sickle cell disease", "sickle cell anemia"]},
+    {"name": "beta-thalassemia", "type": "disease", "external_source": "MONDO", "external_id": "MONDO:0019402", "aliases": ["beta-thalassemia", "beta thalassemia"]},
+    {"name": "melanoma", "type": "disease", "external_source": "MONDO", "external_id": "MONDO:0005105", "aliases": ["melanoma"]},
+    {"name": "non-Hodgkin lymphoma", "type": "disease", "external_source": "MONDO", "external_id": "MONDO:0018908", "aliases": ["non-Hodgkin lymphoma", "lymphoma"]},
+    {"name": "type 2 diabetes mellitus", "type": "disease", "external_source": "MONDO", "external_id": "MONDO:0005148", "aliases": ["type 2 diabetes", "type 2 diabetes mellitus"]},
+    {"name": "obesity", "type": "disease", "external_source": "HPO", "external_id": "HP:0001513", "aliases": ["obesity"]},
+    {"name": "Alzheimer disease", "type": "disease", "external_source": "MONDO", "external_id": "MONDO:0004975", "aliases": ["Alzheimer's disease", "Alzheimer disease"]},
+    {"name": "Duchenne muscular dystrophy", "type": "disease", "external_source": "MONDO", "external_id": "MONDO:0010679", "aliases": ["Duchenne muscular dystrophy"]},
+    {"name": "Clostridium difficile colitis", "type": "disease", "external_source": "MONDO", "external_id": "MONDO:0000705", "aliases": ["C. difficile infection", "Clostridium difficile infection", "C. diff infection"]},
+    {"name": "plasma cell myeloma", "type": "disease", "external_source": "MONDO", "external_id": "MONDO:0009693", "aliases": ["multiple myeloma"]},
+
+    {"name": "semaglutide", "type": "drug", "external_source": "ChEMBL", "external_id": "CHEMBL4556788", "aliases": ["semaglutide"]},
+    {"name": "pembrolizumab", "type": "drug", "external_source": "ChEMBL", "external_id": "CHEMBL3137343", "aliases": ["pembrolizumab"]},
+    {"name": "tirzepatide", "type": "drug", "external_source": "ChEMBL", "external_id": "CHEMBL4297839", "aliases": ["tirzepatide"]},
+    {"name": "exagamglogene autotemcel", "type": "drug", "external_source": "ChEMBL", "external_id": "CHEMBL5095474", "aliases": ["exagamglogene autotemcel", "exa-cel"]},
+    {"name": "nirmatrelvir", "type": "drug", "external_source": "ChEMBL", "external_id": "CHEMBL5201264", "aliases": ["nirmatrelvir"]},
+
+    {"name": "BCL11A", "type": "gene", "external_source": "HGNC", "external_id": "HGNC:13221", "aliases": ["BCL11A"]},
+    {"name": "CFTR", "type": "gene", "external_source": "HGNC", "external_id": "HGNC:1884", "aliases": ["CFTR"]},
+    {"name": "PCSK9", "type": "gene", "external_source": "HGNC", "external_id": "HGNC:20001", "aliases": ["PCSK9"]},
+    {"name": "HBB", "type": "gene", "external_source": "HGNC", "external_id": "HGNC:4827", "aliases": ["HBB"]},
+
+    {"name": "Moderna", "type": "company", "external_source": null, "external_id": "NASDAQ:MRNA", "aliases": ["Moderna"]},
+    {"name": "Pfizer", "type": "company", "external_source": null, "external_id": "NYSE:PFE", "aliases": ["Pfizer"]},
+    {"name": "Vertex Pharmaceuticals", "type": "company", "external_source": null, "external_id": "NASDAQ:VRTX", "aliases": ["Vertex Pharmaceuticals", "Vertex"]},
+    {"name": "Regeneron", "type": "company", "external_source": null, "external_id": "NASDAQ:REGN", "aliases": ["Regeneron"]},
+    {"name": "Novo Nordisk", "type": "company", "external_source": null, "external_id": "NYSE:NVO", "aliases": ["Novo Nordisk"]},
+    {"name": "Eli Lilly", "type": "company", "external_source": null, "external_id": "NYSE:LLY", "aliases": ["Eli Lilly", "Lilly"]},
+    {"name": "Bristol Myers Squibb", "type": "company", "external_source": null, "external_id": "NYSE:BMY", "aliases": ["Bristol Myers Squibb", "Bristol-Myers Squibb"]},
+    {"name": "bluebird bio", "type": "company", "external_source": null, "external_id": "NASDAQ:BLUE", "aliases": ["bluebird bio"]},
+    {"name": "Merck", "type": "company", "external_source": null, "external_id": "NYSE:MRK", "aliases": ["Merck"]},
+    {"name": "Novartis", "type": "company", "external_source": null, "external_id": "NYSE:NVS", "aliases": ["Novartis"]}
+  ]
+}

@@ -147,13 +147,19 @@ def record_ingestion_run(
     added: dict[str, int],
     errors: dict[str, str],
     embedded: int = 0,
+    entities_extracted: int = 0,
 ) -> IngestionRun:
     run = IngestionRun(
         started_at=started_at,
         finished_at=datetime.now(timezone.utc),
         added_total=sum(added.values()),
         error_count=len(errors),
-        detail={"added": added, "errors": errors, "embedded": embedded},
+        detail={
+            "added": added,
+            "errors": errors,
+            "embedded": embedded,
+            "entities_extracted": entities_extracted,
+        },
     )
     db.add(run)
     db.commit()

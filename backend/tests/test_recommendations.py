@@ -315,17 +315,21 @@ def test_v07_endpoint_falls_back_without_trained_models(client, db_session):
     crashed app startup entirely in CI (requirements.txt intentionally
     excludes those heavy deps). See app/ml/recommender_v07.py.
     """
+    from app.auth.jwt import create_access_token
+
     resp = client.post("/users", json={"email": "v07-test@example.com"})
     user_id = resp.json()["id"]
+    headers = {"Authorization": f"Bearer {create_access_token(user_id)}"}
 
     art1 = _make_article(db_session, "CRISPR therapy for sickle cell disease")
     resp = client.post(
         f"/users/{user_id}/interactions",
         json={"article_id": art1.id, "interaction_type": "bookmark"},
+        headers=headers,
     )
     assert resp.status_code == 200
 
-    resp = client.get(f"/v0.7/users/{user_id}/feed")
+    resp = client.get(f"/v0.7/users/{user_id}/feed", headers=headers)
     assert resp.status_code == 200
     body = resp.json()
     assert "items" in body

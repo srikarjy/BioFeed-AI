@@ -105,3 +105,21 @@ class FeedResponse(BaseModel):
     items: list[FeedItem]
     next_cursor: int | None = None
     cold_start: bool = False  # True if using fallback (no user embedding yet)
+
+
+# v0.9: structured, multi-signal "recommended because..." explanations
+# (app/ml/explain.py) -- richer than FeedItem.reason's single string.
+
+class ExplanationSignalRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    label: str
+    detail: str
+    weight: float
+
+
+class ExplanationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    summary: str
+    signals: list[ExplanationSignalRead]

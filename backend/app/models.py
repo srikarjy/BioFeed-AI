@@ -30,6 +30,11 @@ class Article(Base):
     # Semantic embedding of title + summary (see app.ml.service). Nullable so
     # ingestion never blocks on the embedder; embed_missing backfills gaps.
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM), nullable=True)
+    # Set once kg entity extraction has run on this article, regardless of
+    # whether any gazetteer entity matched -- without this, an article with
+    # zero matches would look identical to "never processed" and get
+    # re-scanned by every backfill run forever (see app/kg/crud.py).
+    kg_extracted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

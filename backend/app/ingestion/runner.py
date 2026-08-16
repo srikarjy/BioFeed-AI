@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app import crud
 from app.ingestion.base import Source
+from app.kg import service as kg_service
 from app.ml import service as ml_service
 from app.models import IngestionRun
 
@@ -54,4 +55,13 @@ def run_and_record(
         embedded = ml_service.embed_missing(db)
     except Exception as exc:  # noqa: BLE001 - isolate embedder failures
         errors["_embedding"] = str(exc)
-    return crud.record_ingestion_run(db, started_at, added, errors, embedded=embedded)
+    # Same isolation rule: a gazetteer/extraction bug must not lose the run
+    # record; extract_missing backfills next run (or via POST /kg/extract).
+    entities_extracted = 0
+    try:
+        entities_extracted = kg_service.extract_missing(db)
+    except Exception as exc:  # noqa: BLE001 - isolate extraction failures
+        errors["_kg_extraction"] = str(exc)
+    return crud.record_ingestion_run(
+        db, started_at, added, errors, embedded=embedded, entities_extracted=entities_extracted
+    )
