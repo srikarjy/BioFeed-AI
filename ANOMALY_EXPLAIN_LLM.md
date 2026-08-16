@@ -22,34 +22,42 @@ everything added is additive and lives in `backend/app/anomaly/`,
   for the exact heuristic and thresholds.
 - **LLM route**: real, tested against a local stand-in server, and now
   against a real vLLM server too (below).
-- **vLLM serving**: **verified on real GPUs, four runs across two GPU
-  classes (2026-08-15/16)**. T4 (cheapest HF Jobs flavor): direct-vLLM
-  (`vllm-t4-direct`, TTFT p50 105ms @ concurrency 10) and the real product
-  path end to end — a real FastAPI backend and real vLLM in the *same* GPU
-  job, `GET /internal/anomaly-explain/{event_id}` → `app/llm/client.py` →
-  real vLLM → SSE back to the caller, no stand-ins anywhere
-  (`vllm-t4-full-relay`, TTFT p50 147ms). L4 (the GPU class
-  `llm_serving/serve.sh` actually targets): both direct and full-relay in
-  one job at **matched concurrency (10)** — direct TTFT p50 57.3ms,
-  full-relay TTFT p50 89.1ms, isolating a real ~32ms FastAPI-hop cost.
-  L4 roughly halves TTFT and cuts the p95 tail ~5x vs. T4 at the same
-  concurrency — the GPU-class difference `serve.sh`'s comments assumed but
-  never measured. ~$0.19 total across all four runs. Getting the full-relay
-  runs working surfaced and fixed a real bug: a bare SQLite `DATABASE_URL`
-  crashes a real `uvicorn` process (which runs sync path operations in a
-  threadpool) unless the connection is configured for cross-thread use —
-  `app/database.py` now does this automatically for any `sqlite://` URL.
-  The `llm_serving/` scripts themselves (SSH-based deployment to a rented
-  instance) are still unverified as written — all runs used the official
-  `vllm/vllm-openai` image directly rather than
-  `download_model.sh`/`startup.sh`, though the underlying `serve.sh`
-  engine args are the same ones validated by these runs.
+- **vLLM serving**: **verified on real GPUs, five runs across two GPU
+  classes and two databases (2026-08-15/16)**. T4 (cheapest HF Jobs
+  flavor): direct-vLLM (`vllm-t4-direct`, TTFT p50 105ms @ concurrency 10)
+  and the real product path end to end on SQLite — a real FastAPI backend
+  and real vLLM in the *same* GPU job, `GET /internal/anomaly-explain/{event_id}`
+  → `app/llm/client.py` → real vLLM → SSE back to the caller, no
+  stand-ins anywhere (`vllm-t4-full-relay`, TTFT p50 147ms). L4 (the GPU
+  class `llm_serving/serve.sh` actually targets): both direct and
+  full-relay in one job at **matched concurrency (10)** — direct TTFT p50
+  57.3ms, full-relay TTFT p50 89.1ms, isolating a real ~32ms FastAPI-hop
+  cost; L4 roughly halves TTFT and cuts the p95 tail ~5x vs. T4 at the
+  same concurrency. **Real Postgres from scratch** (`vllm-t4-postgres-full-relay`):
+  installed PostgreSQL and built pgvector from source in a T4 job, ran the
+  actual `alembic upgrade head` (migrations 0001–0006, the same chain CI
+  runs) instead of `Base.metadata.create_all`, then the full pipeline —
+  ingestion, `embed_missing`, KG extraction, anomaly detection — against
+  real Postgres, plus a separate real `GET /search` check against the
+  pgvector HNSW index; TTFT p50 186ms, a real and now-quantified
+  Postgres-vs-SQLite overhead rather than an assumed one. ~$0.24 total
+  across all five runs. Getting the full-relay runs working surfaced and
+  fixed a real bug: a bare SQLite `DATABASE_URL` crashes a real `uvicorn`
+  process (which runs sync path operations in a threadpool) unless the
+  connection is configured for cross-thread use — `app/database.py` now
+  does this automatically for any `sqlite://` URL. The `llm_serving/`
+  scripts themselves (SSH-based deployment to a rented instance) are still
+  unverified as written — all runs used the official `vllm/vllm-openai`
+  image directly rather than `download_model.sh`/`startup.sh`, though the
+  underlying `serve.sh` engine args are the same ones validated by these
+  runs.
 - **Benchmark numbers in `benchmarks/report.md`**: `stub-cpu-local` (CPU
   stand-in) validates the wiring. `vllm-t4-direct`/`vllm-l4-direct`
   validate real vLLM serving performance in isolation. `vllm-t4-full-relay`/
-  `vllm-l4-full-relay` validate the actual thing a client would hit. Six
-  rows total; read the caveats in that file before quoting any of them out
-  of context (different concurrency levels between the T4 and L4 runs).
+  `vllm-l4-full-relay`/`vllm-t4-postgres-full-relay` validate the actual
+  thing a client would hit, the last one on real Postgres. Seven rows
+  total; read the caveats in that file before quoting any of them out of
+  context (different concurrency levels and databases across runs).
 - **Grafana dashboard**: **fixed 2026-08-16**. Checking panel queries
   against real `/metrics` output found 3 of 10 stale
   (`gpu_cache_usage_perc`, `cpu_cache_usage_perc`,

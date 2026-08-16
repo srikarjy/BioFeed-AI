@@ -11,6 +11,40 @@ Numbers labeled `stub-*` were measured against the local CPU stand-in server (se
 | vllm-t4-full-relay | 5 | 15 | 15 | 0 | 1.444 | 151.537 | 2746.1 | 5037.3 | 5118.5 | 147.4 | 2240.9 |
 | vllm-l4-direct | 10 | 30 | 30 | 0 | 3.542 | 517.973 | 2724.2 | 3058.3 | 3060.7 | 57.3 | 408.7 |
 | vllm-l4-full-relay | 10 | 30 | 30 | 0 | 4.320 | 475.804 | 2148.3 | 2476.5 | 2524.8 | 89.1 | 377.3 |
+| vllm-t4-postgres-full-relay | 10 | 30 | 30 | 0 | 2.194 | 246.268 | 3742.6 | 6079.7 | 6201.2 | 186.4 | 2531.2 |
+
+## How `vllm-t4-postgres-full-relay` was produced (2026-08-16) — real Postgres, from scratch
+
+Every prior GPU run used SQLite for speed of standing up an ephemeral box.
+This run built the real thing from scratch in one Hugging Face Jobs
+`t4-small` container: `apt-get install postgresql postgresql-server-dev-all`,
+cloned and built **pgvector from source** (`git clone
+https://github.com/pgvector/pgvector && make && make install`), started
+Postgres, `CREATE EXTENSION vector`, then ran **the actual
+`alembic upgrade head`** against it — migrations 0001 through 0006 in
+sequence (articles → dedup/runs → embeddings → anomaly → recommendation
+engine → knowledge graph), the same migration chain CI runs, not
+`Base.metadata.create_all`. The backend then ran its real pipeline against
+this Postgres: `crud.create_article` → `ml_service.embed_missing` (real
+pgvector column writes) → `kg_service.extract_for_article` (real KG
+tables, real FK constraints) → `detector.detect_recent` (real
+`crud.find_similar` using Postgres's `<=>` operator and HNSW index, not
+the Python-scan SQLite fallback) → `bench_anomaly_explain.py` against the
+real `GET /internal/anomaly-explain/{id}` route → real vLLM. Then, as a
+separate check, `GET /search?q=CRISPR%20sickle%20cell%20gene%20therapy`
+against the real pgvector HNSW index returned both seeded burst articles
+with real cosine similarity scores (0.3814 top hit) — confirming the
+production retrieval code path, not the SQLite test fallback, end to end.
+Job total 412s (~$0.05 at $0.40/hr). Job id
+`srikarjy025/6a8125fbc97db76cbdf32a30`.
+
+**Read against `vllm-t4-full-relay`** (same T4 class, SQLite, concurrency
+5): TTFT p50 is higher here (186ms vs. 147ms) despite *higher* concurrency
+in this run (10 vs. 5) partly offsetting — real Postgres network/query
+overhead (even loopback) plus the heavier `alembic`-created schema
+(indexes, FKs across 9 tables vs. SQLite's simpler DDL) costs a real,
+measurable amount versus SQLite. This is the honest tradeoff SQLite was
+accepted for in the earlier runs, now quantified rather than assumed.
 
 ## How `vllm-t4-full-relay` was produced (2026-08-15) — the real thing, end to end
 
@@ -169,10 +203,6 @@ bound port (either the stub server directly, or vLLM on GPU) via
   confirmed present in real `/metrics` output, but the dashboard hasn't
   been pointed at a live Prometheus+vLLM pair and visually verified —
   still just a metric-name diff, not a rendered screenshot.
-- **Real Postgres in the loop**: every GPU run so far used SQLite for
-  speed of standing up an ephemeral box; production always uses Postgres,
-  and CI already exercises Postgres separately, but a from-scratch
-  GPU-host-with-Postgres run hasn't been done.
 - **A100/H200-class numbers**: not attempted — T4 and L4 are the cheapest
   two HF Jobs GPU flavors and cover the "does GPU class matter" question;
   bigger classes aren't part of this project's target deployment shape.

@@ -354,9 +354,19 @@ none of this reintroduced the unconditional-heavy-import bug.
       the same L4 job, both at concurrency 10: TTFT p50 57.3ms (direct) →
       89.1ms (full relay), isolating a real ~32ms FastAPI-hop cost
       (`vllm-l4-full-relay`).
-- [ ] A from-scratch GPU-host run with real Postgres in the loop (every
-      GPU run so far used SQLite for setup speed; Postgres is already
-      exercised separately in CI, but not together with a live GPU).
+- [x] ~~A from-scratch GPU-host run with real Postgres in the loop~~ —
+      done 2026-08-16 (`vllm-t4-postgres-full-relay`): installed
+      PostgreSQL + built pgvector from source in a Hugging Face Jobs T4
+      container, ran the real `alembic upgrade head` (migrations 0001–0006,
+      the same chain CI runs, not `Base.metadata.create_all`), then the
+      real pipeline end to end — ingestion → `embed_missing` → KG
+      extraction → anomaly detection, all against real Postgres — through
+      to real vLLM. Also separately confirmed `GET /search` against the
+      real pgvector HNSW index (not the SQLite Python-scan fallback)
+      returned correct results with real cosine similarity. TTFT p50
+      186ms — higher than the SQLite full-relay run's 147ms, a real and
+      now-quantified Postgres overhead rather than an assumed one. Job
+      cost ~$0.05 (412s). See `benchmarks/report.md`.
 
 ### v0.8 remaining
 - [x] ~~Expand the gazetteer~~ — 30 → 54 entities across two passes
