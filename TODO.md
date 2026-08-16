@@ -23,10 +23,12 @@ job-search motion itself. Ordered by leverage, not by version number.
       free-tier RAM/cost, documented in README's "Live deployment" section.
 - [x] ~~Link the live URL at the top of README~~ — done.
 - [ ] One-time account-side setup still needed (can't be done blind from the
-      repo): make the GHCR package public, create the Render Blueprint
-      deploy from `render.yaml`, and store the resulting deploy-hook URL as
-      the `RENDER_DEPLOY_HOOK_URL` GitHub secret so CI's new step actually
-      fires. See the plan for the exact steps.
+      repo — see README's "Live deployment" → "One-time deploy setup"):
+      create a GitHub PAT (`read:packages`), add it as a Render Registry
+      Credential named `biofeed-ai-ghcr` (keeps the GHCR package private,
+      per user preference), deploy the Blueprint from `render.yaml`, and
+      store the resulting deploy-hook URL as the `RENDER_DEPLOY_HOOK_URL`
+      GitHub secret so CI's new step actually fires.
 - [ ] After first deploy: `curl -X POST .../ingest/run` once so the demo has
       real articles immediately instead of waiting for the first scheduled
       interval.

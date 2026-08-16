@@ -9,6 +9,11 @@ services:
     runtime: image
     image:
       url: ghcr.io/srikarjy/biofeed-ai/backend:latest
+      # GHCR package stays private; Render needs a Registry Credential
+      # (Account Settings -> Registry Credentials) named exactly this,
+      # created once from a GitHub PAT with `read:packages` scope. See
+      # README's "Live deployment" section for the one-time setup.
+      creds: biofeed-ai-ghcr
     plan: free
     healthCheckPath: /health
     envVars:

@@ -171,6 +171,18 @@ What's different from a full local/prod run, and why:
   misconfigured deployment fails closed rather than silently trusting
   anything.
 
+**One-time deploy setup** (account-bound, done once outside the repo):
+1. GitHub → Settings → Developer settings → create a classic PAT scoped to
+   `read:packages` only.
+2. Render → Account Settings → Registry Credentials → add a credential named
+   `biofeed-ai-ghcr` (must match `render.yaml`'s `image.creds`), registry
+   `ghcr.io`, username your GitHub username, password the PAT from step 1.
+   This keeps the GHCR package private rather than exposing it publicly.
+3. Render → New → Blueprint → connect this repo → deploy from `render.yaml`.
+4. Copy the resulting service's deploy hook URL and set it as the
+   `RENDER_DEPLOY_HOOK_URL` GitHub Actions secret so `docker.yml` can trigger
+   redeploys automatically on push to `main`.
+
 ## Repo structure
 
 ```
