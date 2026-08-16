@@ -166,17 +166,104 @@ market-signal module. Fully isolated in `app/anomaly/`, `app/llm/`,
   `/metrics` endpoint (the ephemeral job's port wasn't exposed for external
   scraping this pass).
 
+### v0.3 — Authentication ✅ (backend; no iOS client to actually run it against)
+
+`app/auth/`, additive and isolated the same way the anomaly/LLM feature is.
+
+- JWT access (30 min) + refresh (30 day) tokens (`app/auth/jwt.py`), HS256,
+  typed claims so a refresh token can't be replayed as an access token.
+- Pluggable identity verification (`app/auth/providers.py`):
+  `AppleIdentityVerifier`/`GoogleIdentityVerifier` fetch the real JWKS
+  (`appleid.apple.com`/`googleapis.com`) and verify RS256 signature +
+  iss/aud — real code, but **unverified beyond that**: exercising it needs
+  a registered Apple Services ID / Google OAuth client and a real identity
+  token minted by their SDKs, neither of which exist without v0.4's iOS
+  app. `FakeIdentityVerifier` (default, `AUTH_PROVIDER=fake`) trusts a JSON
+  blob instead, making the rest of the flow — issuance, refresh, route
+  enforcement — fully testable without either. Nothing defaults to `real`,
+  so a misconfigured deployment fails closed.
+- `POST /auth/apple`, `POST /auth/google`, `POST /auth/refresh`, `GET /auth/me`.
+- `require_self` dependency actually wired into every `/users/{id}/...`
+  route that touches a specific user's private data (interactions,
+  embedding, feed, the new v0.9 explain endpoint) — 401 unauthenticated,
+  403 authenticated-as-someone-else. `POST /users` (raw create/lookup) and
+  `GET /users/{id}` (profile) stay open by design; see the comment in
+  `app/routers/recommendations.py`.
+- 17 tests (`tests/test_auth.py`) covering issuance, refresh, wrong-token-type
+  rejection, and enforcement on the protected routes.
+
+### v0.8 — Knowledge Graph ✅
+
+`app/kg/`, wired into the ingestion pipeline.
+
+- **Entities grounded in real ontology identifiers** — each looked up live
+  against the source ontology's public API during development: MONDO/HPO
+  for disease, ChEMBL for drug, HGNC for gene (`app/kg/gazetteer.json`,
+  see its `_provenance` field for the exact lookup commands to
+  re-verify). Substituted HGNC/HPO for UMLS since UMLS needs a license/API
+  key this project doesn't have — same "real, public, no key" bar, not a
+  downgrade in kind. Company entities are self-grounding (real names +
+  public tickers).
+- **Dictionary/gazetteer extraction** (`app/kg/extractor.py`) — word-boundary,
+  case-insensitive matching over the gazetteer, longest-alias-first so
+  overlapping surface forms don't double-count. Deliberately not a trained
+  NER model (e.g. scispaCy): that would catch entities outside the
+  gazetteer, but "matches a small curated real-ontology list" is a more
+  honest and inspectable v0.8 slice than a model whose precision/recall on
+  this corpus was never measured — see the module docstring.
+- **Co-occurrence relations** (`app/kg/service.py`) — two entities
+  co-mentioned in one article get a directed edge, predicate chosen by
+  entity-type pair (company+drug → `develops`, drug+disease → `targets`,
+  etc.), falling back to `co_mentioned_with`. Explicitly a same-article
+  co-occurrence heuristic, not a verified causal or biological claim — the
+  model docstring says so directly.
+- `GET /kg/entities`, `GET /kg/entities/{id}`, `GET /kg/entities/{id}/relations`,
+  `GET /kg/articles/{id}/entities`, `POST /kg/extract` (manual backfill).
+- Wired into `run_and_record` (same isolation pattern as embedding: an
+  extraction failure can't lose the ingestion run record) and recorded in
+  `IngestionRun.detail.entities_extracted`.
+- `Article.kg_extracted_at` tracks processed state so an article matching
+  zero gazetteer entities doesn't get rescanned by every backfill forever
+  — a real gap the first draft of `article_ids_missing_extraction` had
+  (using "no EntityMention row" as the signal), fixed before it shipped.
+- 13 tests (`tests/test_kg.py`).
+
+### v0.9 — Explainable AI ✅
+
+`app/ml/explain.py` + `GET /users/{id}/articles/{id}/explain`.
+
+- Multi-signal structured explanation (`ExplanationSignal(label, detail,
+  weight)`, sorted by weight) instead of the v0.6 feed's single heuristic
+  string: nearest-interaction cosine similarity, topic/source affinity
+  (the *same* signal the v0.7 reranker trains on — this explains the
+  model, it isn't a separate story invented for display), freshness,
+  popularity, source quality, and — the one signal that couldn't exist
+  before this pass — v0.8 knowledge-graph entities shared between the
+  candidate article and the user's recently-interacted articles.
+  `FeedItem.reason` (every `/feed` item) stays the cheap one-liner for list
+  rendering; `/explain` is the tap-through detail view.
+- **Refactor along the way**: pulled `compute_source_quality`,
+  `compute_freshness_days`, `compute_item_popularity`,
+  `compute_user_affinities`, `get_user_stats` out of `reranker.py` into a
+  new dependency-free `app/ml/signals.py`, so `explain.py` (imported by the
+  always-loaded `/users` router) doesn't pull in numpy/lightgbm — the exact
+  import-discipline that fixed the v0.7 CI bug (decision #22), now applied
+  proactively instead of after breaking something.
+- 8 tests (`tests/test_explain.py`).
+
+**67 tests passing overall (was 35 before this pass)**, including a clean
+venv built from `requirements.txt` alone (no torch/lightgbm) to confirm
+none of this reintroduced the unconditional-heavy-import bug.
+
 ---
 
 ## 2. Future Tasks
 
-### v0.3 — Authentication
-- [ ] Sign in with Apple, Google OAuth, JWT access + refresh tokens, user
-      profiles, Keychain storage on iOS.
-
 ### v0.4 — Mobile Application
 - [ ] SwiftUI feed, article page, search, bookmarking, reading history,
-      offline cache (`/ios` directory — doesn't exist yet).
+      offline cache (`/ios` directory — doesn't exist yet). Also the only
+      way to actually exercise the real Apple/Google identity verifiers
+      end to end (needs a real device + registered app).
 
 ### v0.5 remaining (deferred, not blocking)
 - [ ] Summaries and entity extraction (orgs, diseases, genes, drugs, funding
@@ -209,20 +296,27 @@ market-signal module. Fully isolated in `app/anomaly/`, `app/llm/`,
 - [ ] A10G/L4-class numbers for comparison against the T4 baseline above —
       the originally targeted GPU class in `llm_serving/serve.sh`.
 
-### v0.8 — Knowledge Graph
-- [ ] Entity relationship graph (company → disease → trial → drug → paper),
-      grounded in real ontologies (UMLS, MONDO, ChEMBL), not just NLP
-      co-occurrence.
+### v0.8 remaining
+- [ ] Expand the gazetteer beyond ~30 hand-curated entities (or add a real
+      NER model as a second extraction pass) — the dictionary matcher only
+      finds what's in `gazetteer.json`.
+- [ ] Ground `trial` entities (NCT ids) — not attempted this pass; would
+      need a ClinicalTrials.gov lookup similar to the MONDO/ChEMBL/HGNC
+      ones already done.
 
-### v0.9 — Explainable AI
-- [ ] Richer "recommended because…" reasoning surfaced per feed item (the
-      v0.6 version is a single heuristic string, not a modeled explanation).
+### v0.9 remaining
+- [ ] Surface the structured explanation in a UI once v0.4 exists — right
+      now it's a real, tested JSON endpoint with no client consuming it.
+- [ ] Replace the source-affinity-as-topic-affinity proxy (see
+      `app/ml/signals.compute_user_affinities`) with a real per-article
+      topic derived from v0.8 KG entities, now that entities exist.
 
 ### v1.0 — Production Release
 - [ ] Full ingestion + auth + personalized feed + search + bookmarks +
       notifications, monitoring (Prometheus/Grafana already exist for the
       LLM path — extend to the core service), MLflow, CI/CD, Dockerized AWS
-      deployment.
+      deployment. Needs real AWS credentials/spend — out of scope until
+      explicitly requested.
 
 ### Post-1.0
 - v1.1 push notifications / daily digest · v1.2 follow
@@ -264,6 +358,13 @@ market-signal module. Fully isolated in `app/anomaly/`, `app/llm/`,
 | 23 | **`lightgbm` imported before `torch` in the v0.7 load path** | Both bundle their own OpenMP runtime; on macOS, importing torch first and then calling into lightgbm segfaults. `_load_models` imports `lightgbm` first (even though it's only used later in the reranker branch) to establish a safe load order for the rest of the process's lifetime; `OMP_NUM_THREADS=1` is still required on top of this (see Dockerfile) — the reorder alone wasn't sufficient. |
 | 24 | **Synthetic seed script (`scripts/seed_v07_synthetic.py`) to verify the v0.7 pipeline, not to fake a trained model** | With zero real users, `train_v07.py` had literally never been executed — it was untested code. A disjoint, deliberately non-real, topic-clustered synthetic corpus + users lets the training/inference pipeline be run and verified end to end (it trained, it loaded, it scored). Explicitly not committed as a shipped model or represented as trained on real behavior — see the caveat in `METRICS.md`. |
 | 25 | **Model checkpoints (`*.pt`, `models/*.txt`) stay out of git (`.gitignore`)** | Trained artifacts are reproducible from `train_v07.py`/`seed_v07_synthetic.py` and change size/content on every run; committing them would bloat the repo for no benefit over documenting how to regenerate them. |
+| 26 | **Pluggable identity verification, `fake` as the default** | Real Apple/Google verification needs a registered app and real device-minted tokens that don't exist without v0.4. A fake provider that trusts a JSON blob keeps the entire auth flow — issuance, refresh, route enforcement — testable now; nothing defaults to `real`, so a misconfigured deployment fails closed instead of silently trusting anything. |
+| 27 | **`require_self` enforced on existing v0.6/v0.7 routes immediately, not deferred to v0.4** | Auth infrastructure that issues tokens nothing checks is the same "built but never wired up" pattern that caused the v0.7 CI bug — worth avoiding proactively. `POST /users` and `GET /users/{id}` stay open (predates auth / public profile) so the change is additive enforcement, not a breaking redesign. |
+| 28 | **HGNC/HPO in place of UMLS for gene/phenotype grounding** | UMLS requires a license and API key this project doesn't have. HGNC (genes) and HPO (phenotypes) are real, public, no-key ontologies with the same "genuinely grounded" property BLUEPRINT.md asks for — a substitution within the spirit of the requirement, not a downgrade to NLP co-occurrence. |
+| 29 | **Dictionary/gazetteer entity extraction over a trained NER model** | A trained model (e.g. scispaCy) would generalize beyond the gazetteer, but adds a dependency/download and its precision/recall on this corpus would be unmeasured. A small, hand-verified gazetteer is fully inspectable — every entity's grounding can be checked with one curl command (see gazetteer.json's `_provenance`) — which is a more honest v0.8 slice to ship first. |
+| 30 | **`Article.kg_extracted_at` instead of "has an EntityMention row" as the backfill signal** | An article can legitimately match zero gazetteer entities. Keying the backfill query off mention-row existence would rescan every zero-match article on every run forever; an explicit processed-timestamp (mirroring how embeddings use a nullable column, not a side table) fixes it. Caught before shipping, not after. |
+| 31 | **Relations are same-article co-occurrence with type-informed predicates, labeled as a heuristic** | No relation-extraction model exists in this stack. Labeling edges `develops`/`targets`/`co_mentioned_with` by entity-type pair is a legible, cheap heuristic — but it's still just co-occurrence, and the model/service docstrings say so directly rather than implying a verified biological claim. |
+| 32 | **`app/ml/signals.py` split out of `reranker.py`** | `explain.py` needed the same user/item signal functions reranker.py already had, but importing reranker.py would pull numpy+lightgbm into the always-loaded `/users` router's import path — the exact bug class fixed for v0.7 (decision #22). Splitting the pure-Python signal functions into their own module lets both consume them without either paying that cost. |
 
 ---
 
@@ -276,31 +377,35 @@ METRICS.md                measured vs. target numbers
 ANOMALY_EXPLAIN_LLM.md    anomaly detection + self-hosted vLLM explanation feature
 docker-compose.yml        backend + Postgres
 backend/
-  alembic/                migrations 0001 (articles) → 0005+ (users, interactions, embeddings, anomaly)
+  alembic/                migrations 0001 (articles) → 0006 (kg entities/mentions/relations)
   app/
     main.py, config.py, database.py, scheduler.py
-    models.py             Article, IngestionRun, User, UserInteraction, UserEmbedding
-    schemas.py            Pydantic models
+    models.py             Article (+kg_extracted_at), IngestionRun, User, UserInteraction, UserEmbedding
+    schemas.py            Pydantic models (+ ExplanationRead for v0.9)
     crud.py               dedup + get-or-create + run recording + find_similar + recommendation logic
-    routers/              articles (+ /related), ingestion, search, recommendations (v0.6), recommendations_v07
+    routers/              articles (+ /related), ingestion, search, recommendations (v0.6, +/explain), recommendations_v07
+    auth/                 JWT issuance/refresh, pluggable Apple/Google/fake identity verification, require_self
+    kg/                   Entity/EntityMention/EntityRelation, gazetteer extractor, /kg routes
     ingestion/
-      base.py, registry.py, runner.py    Source ABC + registry + generic runner
+      base.py, registry.py, runner.py    Source ABC + registry + generic runner (embeds + extracts entities)
       rss.py, pubmed.py, biorxiv.py      RSS, PubMed E-utilities, bioRxiv/medRxiv sources
       feeds.py            RSS feed list
     ml/
       embeddings.py       Embedder backends (hash / PubMedBERT)
       service.py          embed lifecycle
+      signals.py          dependency-free user/item signals shared by reranker + explain
       two_tower.py        v0.7 two-tower retrieval model
       reranker.py         v0.7 LightGBM reranker + feature extraction
       recommender_v07.py  v0.7 pipeline with v0.6 fallback
+      explain.py          v0.9 structured multi-signal explanations
     anomaly/              AnomalyEvent model, cross-source burst detector, internal routes
     llm/                  vLLM client, prompt builder, SSE route
   scripts/
     eval_retrieval.py     v0.5 retrieval quality eval (Recall@k, NDCG@k)
     train_v07.py          two-tower + reranker training pipeline
     seed_v07_synthetic.py synthetic corpus/users to exercise train_v07.py without real users
-  requirements-ml.txt     heavy ML deps (sentence-transformers/torch), split out to keep CI light
-  tests/                  API, RSS, CRUD, dedup, retrieval, retrieval-eval, recommendations, anomaly tests
+  requirements-ml.txt     heavy ML deps (sentence-transformers/torch/lightgbm/numpy), split out to keep CI light
+  tests/                  API, RSS, CRUD, dedup, retrieval, retrieval-eval, recommendations, auth, kg, explain, anomaly tests
 llm_serving/              GPU-instance vLLM deployment scripts (see ANOMALY_EXPLAIN_LLM.md)
 observability/            Prometheus + Grafana, scrapes a remote vLLM /metrics
 benchmarks/               Load-test reports for the anomaly-explain endpoint

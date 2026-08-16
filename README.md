@@ -32,14 +32,26 @@ A FastAPI backend (native iOS client planned, not yet built) that:
    content-similarity for cold-start users with no history yet.
 4. **Explains anomalies via a self-hosted LLM**: a cross-source burst
    detector flags when multiple outlets cover the same story within 48h,
-   and a vLLM-served model streams a plain-language explanation — backend
-   infrastructure work (SSE streaming, Prometheus/Grafana, load-testing)
-   kept isolated from the core feed, documented honestly as unverified
-   against a real GPU (see [`ANOMALY_EXPLAIN_LLM.md`](./ANOMALY_EXPLAIN_LLM.md)).
+   and a vLLM-served model streams a plain-language explanation, verified
+   on a real GPU (see [`ANOMALY_EXPLAIN_LLM.md`](./ANOMALY_EXPLAIN_LLM.md)).
+5. **Authenticates users** via Sign in with Apple/Google — JWT access +
+   refresh tokens, pluggable identity verification (a fake provider for
+   dev/test, real Apple/Google JWKS verification for prod), and every
+   user-scoped route actually enforces "you can only touch your own data."
+6. **Builds a knowledge graph** of entities grounded in real ontology
+   identifiers (MONDO/HPO, ChEMBL, HGNC) extracted from every ingested
+   article, with co-occurrence relations (`company → develops → drug`,
+   `drug → targets → disease`) queryable via `GET /kg/...`.
+7. **Explains recommendations with structured, multi-signal reasoning** —
+   nearest-interaction similarity, topic/source affinity, freshness,
+   popularity, and shared knowledge-graph entities, each surfaced with its
+   own weight via `GET /users/{id}/articles/{id}/explain`.
 
-The mobile client, auth, knowledge graph, and the v2.0 market-signal module
-are roadmap, not shipped — see [`BLUEPRINT.md`](./BLUEPRINT.md) §4 for what's
-next and why the order was chosen.
+The mobile client and the v2.0 market-signal module are roadmap, not
+shipped — see [`BLUEPRINT.md`](./BLUEPRINT.md) §4 for what's next and why
+the order was chosen. Both need real AWS spend / an iOS device+Apple
+Developer account to go further, so they're gated on an explicit decision
+to invest in them, not on remaining engineering effort.
 
 ## Quick links
 
@@ -53,13 +65,16 @@ next and why the order was chosen.
 
 ## Status
 
-**v0.1–v0.7 shipped**: FastAPI + PostgreSQL foundation, multi-source
+**v0.1–v0.9 shipped**: FastAPI + PostgreSQL foundation, multi-source
 ingestion (RSS + PubMed + bioRxiv/medRxiv) on a scheduler, semantic search
-and retrieval over pgvector, and a two-tower + LightGBM recommendation
-pipeline with a labeled retrieval eval set. Plus an additive anomaly
-detection + self-hosted LLM explanation feature. See `PROJECT_STATUS.md`
-for the full breakdown and what's next (auth, mobile app, knowledge graph,
-market-signal module).
+and retrieval over pgvector, a two-tower + LightGBM recommendation pipeline
+with a labeled retrieval eval set, JWT auth with pluggable Apple/Google
+verification, a knowledge graph grounded in real ontology identifiers, and
+structured multi-signal recommendation explanations. Plus an additive
+anomaly detection + self-hosted LLM explanation feature, verified on a real
+GPU. 67 backend tests passing. See `PROJECT_STATUS.md` for the full
+breakdown and what's next (mobile app, market-signal module — both gated
+on real spend/an Apple Developer account, not remaining engineering work).
 
 ## Running it
 
@@ -94,12 +109,14 @@ EMBEDDING_BACKEND=hash python scripts/eval_retrieval.py
 backend/            FastAPI service
   app/
     ingestion/       Source abstraction: RSS, PubMed, bioRxiv/medRxiv
-    ml/               Embeddings, two-tower model, LightGBM reranker
+    ml/               Embeddings, two-tower model, LightGBM reranker, explanations
+    auth/             JWT + pluggable Apple/Google/fake identity verification
+    kg/               Knowledge graph: gazetteer extraction, entities, relations
     anomaly/          Cross-source burst detector
     llm/              vLLM client + SSE route for anomaly explanations
     routers/          articles, search, ingestion, recommendations
-  scripts/            eval_retrieval.py, train_v07.py
-  tests/              pytest suite (API, dedup, retrieval, recommendations)
+  scripts/            eval_retrieval.py, train_v07.py, seed_v07_synthetic.py
+  tests/              pytest suite (API, dedup, retrieval, recommendations, auth, kg, explain, anomaly)
 llm_serving/         GPU-instance vLLM deployment scripts
 observability/       Prometheus + Grafana (scrapes vLLM /metrics)
 benchmarks/          Load-test reports for the anomaly-explain endpoint
