@@ -225,6 +225,16 @@ market-signal module. Fully isolated in `app/anomaly/`, `app/llm/`,
   etc.), falling back to `co_mentioned_with`. Explicitly a same-article
   co-occurrence heuristic, not a verified causal or biological claim — the
   model docstring says so directly.
+- **Trial entities grounded dynamically** (`app/kg/trials.py`, added
+  2026-08-16) — unlike the static gazetteer, NCT ids are extracted via
+  regex from article text and looked up live against ClinicalTrials.gov's
+  public API per article, only for NCT ids not already known locally (no
+  repeat network call for a trial already seen). A lookup failure skips
+  that NCT id rather than fabricating a placeholder entity or failing the
+  whole article's extraction — same isolation discipline as source/embedder
+  failures elsewhere. `fetch_trial_title` is injectable so tests don't
+  depend on network access; separately verified against the real API
+  outside pytest (`fetch_trial_title("NCT04173585")` → a real title).
 - `GET /kg/entities`, `GET /kg/entities/{id}`, `GET /kg/entities/{id}/relations`,
   `GET /kg/articles/{id}/entities`, `POST /kg/extract` (manual backfill).
 - Wired into `run_and_record` (same isolation pattern as embedding: an
@@ -234,7 +244,10 @@ market-signal module. Fully isolated in `app/anomaly/`, `app/llm/`,
   zero gazetteer entities doesn't get rescanned by every backfill forever
   — a real gap the first draft of `article_ids_missing_extraction` had
   (using "no EntityMention row" as the signal), fixed before it shipped.
-- 13 tests (`tests/test_kg.py`).
+- Gazetteer expanded 30 → 49 entities (2026-08-16: +8 disease, +4 gene, +7
+  company; ChEMBL's API was down for the drug lookups that day — see
+  `gazetteer.json`'s `_provenance`).
+- 19 tests (`tests/test_kg.py`, was 13).
 
 ### v0.9 — Explainable AI ✅
 
@@ -259,7 +272,7 @@ market-signal module. Fully isolated in `app/anomaly/`, `app/llm/`,
   proactively instead of after breaking something.
 - 8 tests (`tests/test_explain.py`).
 
-**67 tests passing overall (was 35 before this pass)**, including a clean
+**73 tests passing overall (was 35 before this pass)**, including a clean
 venv built from `requirements.txt` alone (no torch/lightgbm) to confirm
 none of this reintroduced the unconditional-heavy-import bug.
 
@@ -315,12 +328,28 @@ none of this reintroduced the unconditional-heavy-import bug.
       exercised separately in CI, but not together with a live GPU).
 
 ### v0.8 remaining
-- [ ] Expand the gazetteer beyond ~30 hand-curated entities (or add a real
-      NER model as a second extraction pass) — the dictionary matcher only
-      finds what's in `gazetteer.json`.
-- [ ] Ground `trial` entities (NCT ids) — not attempted this pass; would
-      need a ClinicalTrials.gov lookup similar to the MONDO/ChEMBL/HGNC
-      ones already done.
+- [x] ~~Expand the gazetteer~~ — 30 → 49 entities (2026-08-16): +8 disease
+      (MONDO), +4 gene (HGNC), +7 company. No new drug entries added —
+      ChEMBL's API was returning HTTP 500 for both `/molecule/search` and
+      `/molecule.json` during this pass (confirmed transient/upstream,
+      previously-working queries also failed that day), so nothing could
+      be live-verified; documented in `gazetteer.json`'s `_provenance`
+      rather than skipped silently.
+- [x] ~~Ground `trial` entities (NCT ids)~~ — done: `app/kg/trials.py`
+      extracts NCT ids via regex and looks up the real title from
+      ClinicalTrials.gov's public API live, per-article, only for NCT ids
+      not already known locally (no repeat network calls for a trial
+      already seen). Unlike the static gazetteer, this is dynamic — new
+      trials get grounded automatically as they're mentioned. A lookup
+      failure skips that NCT id rather than creating a placeholder entity.
+      6 new tests (`tests/test_kg.py`), all against an injected fake
+      fetcher so CI doesn't depend on network access; the real fetcher was
+      separately verified against the live API
+      (`fetch_trial_title("NCT04173585")` → a real trial title).
+- [ ] Retry the ChEMBL drug-entity expansion once the API is stable again.
+- [ ] Still only ~49 hand-curated + dynamically-grounded trial entities —
+      a trained NER model as a second extraction pass would catch entities
+      outside the gazetteer entirely; still deferred, see extractor.py.
 
 ### v0.9 remaining
 - [ ] Surface the structured explanation in a UI once v0.4 exists — right
@@ -384,6 +413,8 @@ none of this reintroduced the unconditional-heavy-import bug.
 | 31 | **Relations are same-article co-occurrence with type-informed predicates, labeled as a heuristic** | No relation-extraction model exists in this stack. Labeling edges `develops`/`targets`/`co_mentioned_with` by entity-type pair is a legible, cheap heuristic — but it's still just co-occurrence, and the model/service docstrings say so directly rather than implying a verified biological claim. |
 | 32 | **`app/ml/signals.py` split out of `reranker.py`** | `explain.py` needed the same user/item signal functions reranker.py already had, but importing reranker.py would pull numpy+lightgbm into the always-loaded `/users` router's import path — the exact bug class fixed for v0.7 (decision #22). Splitting the pure-Python signal functions into their own module lets both consume them without either paying that cost. |
 | 33 | **`app/database.py` auto-detects `sqlite://` and configures `check_same_thread=False` + `StaticPool`** | Discovered running the full FastAPI/SSE relay on a GPU job without Postgres available: a real `uvicorn` process runs sync path operations in a threadpool, and a bare SQLite connection can't cross threads, so the app crashed on the first request. Production always used Postgres so this never surfaced. Fixing it in `app/database.py` (rather than requiring every ad-hoc script to know the workaround, as `tests/conftest.py` and `scripts/seed_v07_synthetic.py` each independently did/needed) makes any future SQLite-backed run — tests, scripts, or a quick verification job — correct by default. |
+| 34 | **Trial entities grounded dynamically (live API), not added to the static gazetteer** | Diseases/drugs/genes/companies are a bounded, slowly-changing set — a curated list is a reasonable fit. Clinical trials are the opposite: new NCT ids appear continuously in real news. A live per-mention ClinicalTrials.gov lookup (cached locally after the first sighting via `external_id`) fits that shape better than trying to pre-populate a list that would always be stale. |
+| 35 | **A lookup failure (trial or ontology) never fabricates a placeholder entity** | `_extract_trial_entities` skips an NCT id outright if the API call fails, rather than creating an entity with a synthetic name like "Trial NCT04173585." A knowledge graph with a wrong or made-up node is worse than a knowledge graph missing a node — the gap is visible and fixable; a plausible-looking fabrication isn't. |
 
 ---
 

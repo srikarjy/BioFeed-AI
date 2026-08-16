@@ -39,6 +39,10 @@ def get_entity(db: Session, entity_id: int) -> Entity | None:
     return db.get(Entity, entity_id)
 
 
+def get_entity_by_external_id(db: Session, external_id: str) -> Entity | None:
+    return db.execute(select(Entity).where(Entity.external_id == external_id)).scalar_one_or_none()
+
+
 def list_entities(db: Session, entity_type: str | None = None, q: str | None = None, limit: int = 100) -> list[Entity]:
     stmt = select(Entity)
     if entity_type:

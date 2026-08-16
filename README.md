@@ -72,7 +72,7 @@ with a labeled retrieval eval set, JWT auth with pluggable Apple/Google
 verification, a knowledge graph grounded in real ontology identifiers, and
 structured multi-signal recommendation explanations. Plus an additive
 anomaly detection + self-hosted LLM explanation feature, verified on a real
-GPU. 67 backend tests passing. See `PROJECT_STATUS.md` for the full
+GPU. 73 backend tests passing. See `PROJECT_STATUS.md` for the full
 breakdown and what's next (mobile app, market-signal module — both gated
 on real spend/an Apple Developer account, not remaining engineering work).
 
@@ -111,7 +111,7 @@ backend/            FastAPI service
     ingestion/       Source abstraction: RSS, PubMed, bioRxiv/medRxiv
     ml/               Embeddings, two-tower model, LightGBM reranker, explanations
     auth/             JWT + pluggable Apple/Google/fake identity verification
-    kg/               Knowledge graph: gazetteer extraction, entities, relations
+    kg/               Knowledge graph: gazetteer + live trial extraction, entities, relations
     anomaly/          Cross-source burst detector
     llm/              vLLM client + SSE route for anomaly explanations
     routers/          articles, search, ingestion, recommendations

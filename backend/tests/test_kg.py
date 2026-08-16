@@ -118,3 +118,81 @@ def test_kg_router_404s(client):
     assert client.get("/kg/entities/999999").status_code == 404
     assert client.get("/kg/entities/999999/relations").status_code == 404
     assert client.get("/kg/articles/999999/entities").status_code == 404
+
+
+def test_extract_nct_ids_finds_distinct_ids_in_order():
+    from app.kg.trials import extract_nct_ids
+
+    text = "The trial (NCT04173585) follows on from NCT01234567 and NCT04173585 again."
+    assert extract_nct_ids(text) == ["NCT04173585", "NCT01234567"]
+
+
+def test_extract_nct_ids_empty_when_none_present():
+    from app.kg.trials import extract_nct_ids
+
+    assert extract_nct_ids("No trial ids here.") == []
+
+
+def _fake_fetcher(known: dict[str, str]):
+    def fetcher(nct_id: str):
+        return known.get(nct_id)
+    return fetcher
+
+
+def test_trial_entity_created_via_injected_fetcher(db_session):
+    article = _make_article(
+        db_session,
+        "Vertex reports results from NCT04173585",
+        "Phase 2 data from the trial were positive.",
+    )
+    fetcher = _fake_fetcher({"NCT04173585": "TEAM-Trial: Targeting Epigenetic Therapy Resistance"})
+
+    entities = service.extract_for_article(db_session, article, trial_fetcher=fetcher)
+    trial = next((e for e in entities if e.entity_type == "trial"), None)
+    assert trial is not None
+    assert trial.external_id == "NCT04173585"
+    assert trial.external_source == "ClinicalTrials.gov"
+    assert trial.name == "TEAM-Trial: Targeting Epigenetic Therapy Resistance"
+
+
+def test_trial_lookup_failure_skips_without_creating_placeholder(db_session):
+    article = _make_article(db_session, "Unrelated update on NCT09999999")
+    fetcher = _fake_fetcher({})  # simulates a 404 / network failure
+
+    entities = service.extract_for_article(db_session, article, trial_fetcher=fetcher)
+    assert not any(e.entity_type == "trial" for e in entities)
+
+
+def test_known_trial_not_refetched(db_session):
+    calls = []
+
+    def counting_fetcher(nct_id):
+        calls.append(nct_id)
+        return "Some Trial Title"
+
+    a1 = _make_article(db_session, "First mention of NCT04173585")
+    a2 = _make_article(db_session, "Second mention of NCT04173585")
+
+    service.extract_for_article(db_session, a1, trial_fetcher=counting_fetcher)
+    service.extract_for_article(db_session, a2, trial_fetcher=counting_fetcher)
+
+    assert calls == ["NCT04173585"]  # second article reused the existing entity
+
+
+def test_trial_creates_typed_relation_with_company(db_session):
+    article = _make_article(
+        db_session,
+        "Vertex sponsors trial NCT04173585 for sickle cell disease",
+        "Phase 3 update from the sponsor.",
+    )
+    fetcher = _fake_fetcher({"NCT04173585": "A Phase 3 Trial"})
+
+    entities = service.extract_for_article(db_session, article, trial_fetcher=fetcher)
+    by_type = {e.entity_type: e for e in entities}
+    assert "company" in by_type and "trial" in by_type
+
+    from app.kg import crud as kg_crud
+
+    relations = kg_crud.get_entity_relations(db_session, by_type["company"].id)
+    predicates = {r.predicate for r in relations}
+    assert "sponsors" in predicates

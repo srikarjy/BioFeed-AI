@@ -1,5 +1,5 @@
 {
-  "_provenance": "Every non-company entry's external_id was looked up live against the source ontology's public API during development (EBI OLS4 for MONDO/HPO, EBI ChEMBL for drugs, genenames.org REST for HGNC) -- not invented. Re-verify with e.g. `curl https://www.ebi.ac.uk/ols4/api/search?q=<term>&ontology=mondo`. Company entries are self-grounding (real company names); tickers are public and easy to independently verify. This is a deliberately small, hand-curated set -- see app/kg/README.md for why a dictionary matcher over a curated gazetteer, not full UMLS/MONDO ingestion or a trained NER model, was the right scope for this pass.",
+  "_provenance": "Every non-company entry's external_id was looked up live against the source ontology's public API during development (EBI OLS4 for MONDO/HPO, EBI ChEMBL for drugs, genenames.org REST for HGNC) -- not invented. Re-verify with e.g. `curl https://www.ebi.ac.uk/ols4/api/search?q=<term>&ontology=mondo`. Company entries are self-grounding (real company names); tickers are public and easy to independently verify. This is a deliberately small, hand-curated set, expanded twice (initial ~30 entries 2026-08-15, +17 disease/gene/company entries 2026-08-16) -- see extractor.py's module docstring for why a dictionary matcher over a curated gazetteer, not full UMLS/MONDO ingestion or a trained NER model, was the right scope for this pass. The 2026-08-16 expansion pass did NOT add new drug entries: EBI's ChEMBL API was returning HTTP 500 for both /molecule/search and /molecule.json at the time (confirmed transient/upstream, not a request-format issue -- verified previously-working queries against the same endpoints also failed), so no new drug IDs could be live-verified that day. Trial entities are grounded separately and dynamically, not in this file -- see app/kg/trials.py (live ClinicalTrials.gov lookup per NCT id mentioned in ingested text, not a static list).",
   "entities": [
     {"name": "sickle cell disease", "type": "disease", "external_source": "MONDO", "external_id": "MONDO:0011382", "aliases": ["sickle cell disease", "sickle cell anemia"]},
     {"name": "beta-thalassemia", "type": "disease", "external_source": "MONDO", "external_id": "MONDO:0019402", "aliases": ["beta-thalassemia", "beta thalassemia"]},
@@ -11,6 +11,14 @@
     {"name": "Duchenne muscular dystrophy", "type": "disease", "external_source": "MONDO", "external_id": "MONDO:0010679", "aliases": ["Duchenne muscular dystrophy"]},
     {"name": "Clostridium difficile colitis", "type": "disease", "external_source": "MONDO", "external_id": "MONDO:0000705", "aliases": ["C. difficile infection", "Clostridium difficile infection", "C. diff infection"]},
     {"name": "plasma cell myeloma", "type": "disease", "external_source": "MONDO", "external_id": "MONDO:0009693", "aliases": ["multiple myeloma"]},
+    {"name": "Parkinson disease", "type": "disease", "external_source": "MONDO", "external_id": "MONDO:0005180", "aliases": ["Parkinson's disease", "Parkinson disease"]},
+    {"name": "cystic fibrosis", "type": "disease", "external_source": "MONDO", "external_id": "MONDO:0009061", "aliases": ["cystic fibrosis"]},
+    {"name": "rheumatoid arthritis", "type": "disease", "external_source": "MONDO", "external_id": "MONDO:0008383", "aliases": ["rheumatoid arthritis"]},
+    {"name": "psoriasis", "type": "disease", "external_source": "MONDO", "external_id": "MONDO:0005083", "aliases": ["psoriasis"]},
+    {"name": "amyotrophic lateral sclerosis", "type": "disease", "external_source": "MONDO", "external_id": "MONDO:0004976", "aliases": ["amyotrophic lateral sclerosis", "ALS"]},
+    {"name": "chronic obstructive pulmonary disease", "type": "disease", "external_source": "MONDO", "external_id": "MONDO:0005002", "aliases": ["chronic obstructive pulmonary disease", "COPD"]},
+    {"name": "metabolic dysfunction-associated steatohepatitis", "type": "disease", "external_source": "MONDO", "external_id": "MONDO:0007027", "aliases": ["NASH", "nonalcoholic steatohepatitis", "MASH"]},
+    {"name": "HIV infectious disease", "type": "disease", "external_source": "MONDO", "external_id": "MONDO:0005109", "aliases": ["HIV infection", "HIV/AIDS"]},
 
     {"name": "semaglutide", "type": "drug", "external_source": "ChEMBL", "external_id": "CHEMBL4556788", "aliases": ["semaglutide"]},
     {"name": "pembrolizumab", "type": "drug", "external_source": "ChEMBL", "external_id": "CHEMBL3137343", "aliases": ["pembrolizumab"]},
@@ -22,6 +30,10 @@
     {"name": "CFTR", "type": "gene", "external_source": "HGNC", "external_id": "HGNC:1884", "aliases": ["CFTR"]},
     {"name": "PCSK9", "type": "gene", "external_source": "HGNC", "external_id": "HGNC:20001", "aliases": ["PCSK9"]},
     {"name": "HBB", "type": "gene", "external_source": "HGNC", "external_id": "HGNC:4827", "aliases": ["HBB"]},
+    {"name": "APOE", "type": "gene", "external_source": "HGNC", "external_id": "HGNC:613", "aliases": ["APOE"]},
+    {"name": "LRRK2", "type": "gene", "external_source": "HGNC", "external_id": "HGNC:18618", "aliases": ["LRRK2"]},
+    {"name": "SMN1", "type": "gene", "external_source": "HGNC", "external_id": "HGNC:11117", "aliases": ["SMN1"]},
+    {"name": "TTR", "type": "gene", "external_source": "HGNC", "external_id": "HGNC:12405", "aliases": ["TTR gene", "transthyretin gene"]},
 
     {"name": "Moderna", "type": "company", "external_source": null, "external_id": "NASDAQ:MRNA", "aliases": ["Moderna"]},
     {"name": "Pfizer", "type": "company", "external_source": null, "external_id": "NYSE:PFE", "aliases": ["Pfizer"]},
@@ -32,6 +44,14 @@
     {"name": "Bristol Myers Squibb", "type": "company", "external_source": null, "external_id": "NYSE:BMY", "aliases": ["Bristol Myers Squibb", "Bristol-Myers Squibb"]},
     {"name": "bluebird bio", "type": "company", "external_source": null, "external_id": "NASDAQ:BLUE", "aliases": ["bluebird bio"]},
     {"name": "Merck", "type": "company", "external_source": null, "external_id": "NYSE:MRK", "aliases": ["Merck"]},
-    {"name": "Novartis", "type": "company", "external_source": null, "external_id": "NYSE:NVS", "aliases": ["Novartis"]}
+    {"name": "Novartis", "type": "company", "external_source": null, "external_id": "NYSE:NVS", "aliases": ["Novartis"]},
+    {"name": "AbbVie", "type": "company", "external_source": null, "external_id": "NYSE:ABBV", "aliases": ["AbbVie"]},
+    {"name": "Gilead Sciences", "type": "company", "external_source": null, "external_id": "NASDAQ:GILD", "aliases": ["Gilead Sciences", "Gilead"]},
+    {"name": "Amgen", "type": "company", "external_source": null, "external_id": "NASDAQ:AMGN", "aliases": ["Amgen"]},
+    {"name": "Biogen", "type": "company", "external_source": null, "external_id": "NASDAQ:BIIB", "aliases": ["Biogen"]},
+    {"name": "AstraZeneca", "type": "company", "external_source": null, "external_id": "NASDAQ:AZN", "aliases": ["AstraZeneca"]},
+    {"name": "Roche", "type": "company", "external_source": null, "external_id": "SWX:ROG", "aliases": ["Roche"]},
+    {"name": "CRISPR Therapeutics", "type": "company", "external_source": null, "external_id": "NASDAQ:CRSP", "aliases": ["CRISPR Therapeutics"]},
+    {"name": "Intellia Therapeutics", "type": "company", "external_source": null, "external_id": "NASDAQ:NTLA", "aliases": ["Intellia Therapeutics", "Intellia"]}
   ]
 }
